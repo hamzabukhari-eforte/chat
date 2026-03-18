@@ -2,10 +2,17 @@ export type Role = "agent" | "customer";
 
 export type ChatStatus = "queued" | "assigned" | "resolved";
 
+export type OnlineStatus = "online" | "away" | "offline";
+
 export interface User {
   id: string;
   name: string;
   role: Role;
+  avatar?: string;
+  email?: string;
+  phone?: string;
+  plan?: string;
+  onlineStatus?: OnlineStatus;
 }
 
 export interface Chat {
@@ -17,6 +24,15 @@ export interface Chat {
   createdAt: string;
 }
 
+export interface Attachment {
+  id: string;
+  type: "image" | "document";
+  name: string;
+  url: string;
+  size?: number;
+  mimeType?: string;
+}
+
 export interface Message {
   id: string;
   chatId: string;
@@ -25,6 +41,7 @@ export interface Message {
   text: string;
   createdAt: string;
   system?: boolean;
+  attachments?: Attachment[];
 }
 
 export type OutgoingEvent =
@@ -42,7 +59,7 @@ export type OutgoingEvent =
     }
   | {
       type: "send-message";
-      payload: { chatId: string; text: string; sender: User };
+      payload: { chatId: string; text: string; sender: User; attachments?: Attachment[] };
     }
   | {
       type: "resolve-chat";

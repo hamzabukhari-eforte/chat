@@ -2,7 +2,7 @@
 
 import { useEffect, useMemo, useState } from "react";
 import { ChatWebSocketClient } from "../lib/websocket/client";
-import type { Chat, Message, User } from "../lib/chat/types";
+import type { Attachment, Chat, Message, User } from "../lib/chat/types";
 
 interface State {
   chats: Chat[];
@@ -138,7 +138,7 @@ export function useWebSocketChat(currentUser: User | null) {
     });
   };
 
-  const sendMessage = (text: string) => {
+  const sendMessage = (text: string, attachments?: Attachment[]) => {
     if (!currentUser || !state.activeChatId) return;
     client.send({
       type: "send-message",
@@ -146,6 +146,7 @@ export function useWebSocketChat(currentUser: User | null) {
         chatId: state.activeChatId,
         text,
         sender: currentUser,
+        attachments,
       },
     });
   };

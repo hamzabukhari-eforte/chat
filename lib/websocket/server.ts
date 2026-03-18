@@ -72,6 +72,7 @@ wss.on("connection", (socket) => {
           senderRole: event.payload.sender.role,
           text: event.payload.text,
           createdAt: new Date().toISOString(),
+          attachments: event.payload.attachments,
         };
         messages.push(msg);
         broadcast({ type: "message", payload: { message: msg } });

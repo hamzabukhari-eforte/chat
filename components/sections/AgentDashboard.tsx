@@ -1,6 +1,7 @@
 "use client";
 
 import { useState } from "react";
+import { AnimatePresence, motion } from "framer-motion";
 import { useAuth } from "../../hooks/useAuth";
 import { useWebSocketChat } from "../../hooks/useWebSocketChat";
 import { ChatSidebarSection } from "./ChatSidebarSection";
@@ -37,9 +38,22 @@ export function AgentDashboard() {
         onToggleCustomerInfo={() => setShowCustomerInfo((prev) => !prev)}
         showCustomerInfo={showCustomerInfo}
       />
-      {showCustomerInfo && (
-        <CustomerInfoSidebarSection customer={chat.activeChat?.customer ?? null} />
-      )}
+      <AnimatePresence>
+        {showCustomerInfo && (
+          <motion.div
+            initial={{ width: 0, opacity: 0 }}
+            animate={{ width: 288, opacity: 1 }}
+            exit={{ width: 0, opacity: 0 }}
+            transition={{ duration: 0.2, ease: "easeInOut" }}
+            className="overflow-hidden shrink-0"
+          >
+            <CustomerInfoSidebarSection
+              customer={chat.activeChat?.customer ?? null}
+              onClose={() => setShowCustomerInfo(false)}
+            />
+          </motion.div>
+        )}
+      </AnimatePresence>
     </>
   );
 }
