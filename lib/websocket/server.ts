@@ -46,6 +46,7 @@ wss.on("connection", (socket) => {
           senderRole: "customer",
           text: event.payload.text,
           createdAt: new Date().toISOString(),
+          attachments: event.payload.attachments,
         };
         chats.push(chat);
         messages.push(msg);

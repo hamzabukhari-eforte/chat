@@ -122,11 +122,11 @@ export function useWebSocketChat(currentUser: User | null) {
     [state.messages, state.activeChatId],
   );
 
-  const startChat = (text: string) => {
+  const startChat = (text: string, attachments?: Attachment[]) => {
     if (!currentUser) return;
     client.send({
       type: "customer-start-chat",
-      payload: { customer: currentUser, text },
+      payload: { customer: currentUser, text, attachments },
     });
   };
 

@@ -1,8 +1,9 @@
 "use client";
 
 import Image from "next/image";
-import { FormEvent, useRef, useState } from "react";
-import { FiInfo, FiSend, FiSmile, FiPaperclip, FiX, FiFile } from "react-icons/fi";
+import { FormEvent, useCallback, useRef, useState } from "react";
+import { FiInfo, FiSend, FiSmile, FiPaperclip, FiX, FiFile, FiMic } from "react-icons/fi";
+import { ChatAudioRecorder } from "../atoms/ChatAudioRecorder";
 import { HiOutlineChatBubbleLeftRight } from "react-icons/hi2";
 import data from "@emoji-mart/data";
 import Picker from "@emoji-mart/react";
@@ -26,7 +27,7 @@ const ACCEPTED_DOC_TYPES = ".pdf,.doc,.docx,.txt,.xls,.xlsx,.csv";
 interface FilePreview {
   id: string;
   file: File;
-  type: "image" | "document";
+  type: "image" | "document" | "audio";
   previewUrl?: string;
 }
 
@@ -135,6 +136,31 @@ export function ChatWindowSection({
   const removeFilePreview = (id: string) => {
     setFilePreviews((prev) => prev.filter((p) => p.id !== id));
   };
+
+  const blobToDataUrl = (blob: Blob): Promise<string> =>
+    new Promise((resolve, reject) => {
+      const reader = new FileReader();
+      reader.onloadend = () => resolve(reader.result as string);
+      reader.onerror = () => reject(reader.error);
+      reader.readAsDataURL(blob);
+    });
+
+  const handleVoiceRecordingComplete = async (blob: Blob) => {
+    const url = await blobToDataUrl(blob);
+    const id = Math.random().toString(36).slice(2);
+    const name = `voice-message-${Date.now()}.webm`;
+    const file = new File([blob], name, {
+      type: blob.type || "audio/webm",
+    });
+    setFilePreviews((prev) => [
+      ...prev,
+      { id, file, type: "audio", previewUrl: url },
+    ]);
+  };
+
+  const handleRecorderOpenChange = useCallback((recorderOpen: boolean) => {
+    if (recorderOpen) setShowEmojiPicker(false);
+  }, []);
 
   const handleSubmit = (event: FormEvent) => {
     event.preventDefault();
@@ -269,6 +295,13 @@ export function ChatWindowSection({
                                 unoptimized
                                 className="rounded-lg object-cover max-w-[200px] max-h-[150px]"
                               />
+                            ) : att.type === "audio" && att.url ? (
+                              <audio
+                                src={att.url}
+                                controls
+                                className="max-w-[220px] rounded-lg"
+                                preload="metadata"
+                              />
                             ) : (
                               <div className="flex items-center gap-2 bg-brand-400 text-white px-3 py-2 rounded-lg">
                                 <FiFile className="w-4 h-4" />
@@ -321,6 +354,13 @@ export function ChatWindowSection({
                                 unoptimized
                                 className="rounded-lg object-cover max-w-[200px] max-h-[150px]"
                               />
+                            ) : att.type === "audio" && att.url ? (
+                              <audio
+                                src={att.url}
+                                controls
+                                className="max-w-[220px] rounded-lg"
+                                preload="metadata"
+                              />
                             ) : (
                               <div className="flex items-center gap-2 bg-gray-200 text-gray-700 px-3 py-2 rounded-lg">
                                 <FiFile className="w-4 h-4" />
@@ -358,7 +398,19 @@ export function ChatWindowSection({
                 key={fp.id}
                 className="relative group bg-white border border-gray-200 rounded-lg p-2 flex items-center gap-2"
               >
-                {fp.type === "image" && fp.previewUrl ? (
+                {fp.type === "audio" && fp.previewUrl ? (
+                  <div className="flex flex-col gap-1 shrink-0">
+                    <div className="w-12 h-12 rounded bg-gray-100 flex items-center justify-center">
+                      <FiMic className="w-5 h-5 text-brand-600" />
+                    </div>
+                    <audio
+                      src={fp.previewUrl}
+                      controls
+                      className="h-8 w-[120px] max-w-[120px]"
+                      preload="metadata"
+                    />
+                  </div>
+                ) : fp.type === "image" && fp.previewUrl ? (
                   <Image
                     src={fp.previewUrl}
                     alt={fp.file.name}
@@ -372,6 +424,7 @@ export function ChatWindowSection({
                     <FiFile className="w-5 h-5 text-gray-400" />
                   </div>
                 )}
+                
                 <div className="flex-1 min-w-0">
                   <p className="text-xs font-medium text-gray-700 truncate max-w-[120px]">
                     {fp.file.name}
@@ -434,13 +487,18 @@ export function ChatWindowSection({
                 className="flex-1 min-w-0 bg-transparent border-none focus:ring-0 py-3 text-sm resize-none max-h-32 min-h-[44px] outline-none text-gray-700"
               />
 
+              <ChatAudioRecorder
+                onRecordingComplete={handleVoiceRecordingComplete}
+                onOpenChange={handleRecorderOpenChange}
+              />
+
               {/* Emoji Picker Button */}
               <div className="relative shrink-0">
                 <button
                   type="button"
                   onClick={() => setShowEmojiPicker(!showEmojiPicker)}
                   className={
-                    "p-3 transition-colors cursor-pointer relative z-10 " +
+                    "py-3 px-1.5 transition-colors cursor-pointer relative z-10 " +
                     (showEmojiPicker
                       ? "text-brand-500"
                       : "text-gray-400 hover:text-gray-600")

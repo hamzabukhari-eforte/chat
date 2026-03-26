@@ -26,7 +26,7 @@ export interface Chat {
 
 export interface Attachment {
   id: string;
-  type: "image" | "document";
+  type: "image" | "document" | "audio";
   name: string;
   url: string;
   size?: number;
@@ -51,7 +51,7 @@ export type OutgoingEvent =
     }
   | {
       type: "customer-start-chat";
-      payload: { customer: User; text: string };
+      payload: { customer: User; text: string; attachments?: Attachment[] };
     }
   | {
       type: "agent-claim-chat";
