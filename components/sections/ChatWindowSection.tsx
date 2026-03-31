@@ -3,6 +3,7 @@
 import Image from "next/image";
 import { FormEvent, useCallback, useRef, useState } from "react";
 import { FiInfo, FiSend, FiSmile, FiPaperclip, FiX, FiFile, FiMic } from "react-icons/fi";
+import { AvatarWithInitials } from "../atoms/AvatarWithInitials";
 import { ChatAudioRecorder } from "../atoms/ChatAudioRecorder";
 import { HiOutlineChatBubbleLeftRight } from "react-icons/hi2";
 import data from "@emoji-mart/data";
@@ -17,9 +18,6 @@ interface Props {
   onToggleCustomerInfo: () => void;
   showCustomerInfo: boolean;
 }
-
-const DEFAULT_CUSTOMER_AVATAR = "/assets/images/avatarCustomer.jpg";
-const DEFAULT_AGENT_AVATAR = "/assets/images/avatarAgent.jpg";
 
 const ACCEPTED_IMAGE_TYPES = "image/jpeg,image/png,image/gif,image/webp";
 const ACCEPTED_DOC_TYPES = ".pdf,.doc,.docx,.txt,.xls,.xlsx,.csv";
@@ -200,8 +198,8 @@ export function ChatWindowSection({
     );
   }
 
-  const customerAvatar = activeChat.customer.avatar || DEFAULT_CUSTOMER_AVATAR;
-  const agentAvatar = activeChat.agent?.avatar || DEFAULT_AGENT_AVATAR;
+  const customerName = activeChat.customer.name;
+  const agentName = activeChat.agent?.name ?? "Agent";
 
   const sortedMessages = [...messages].sort(
     (a, b) => new Date(a.createdAt).getTime() - new Date(b.createdAt).getTime(),
@@ -212,16 +210,15 @@ export function ChatWindowSection({
       {/* Header */}
       <div className="p-4 border-b border-gray-200 flex items-center justify-between shrink-0">
         <div className="flex items-center gap-3">
-          <Image
-            src={customerAvatar}
-            alt={activeChat.customer.name}
-            width={40}
-            height={40}
-            className="w-10 h-10 rounded-full object-cover"
+          <AvatarWithInitials
+            name={customerName}
+            src={activeChat.customer.avatar}
+            size={40}
+            alt={customerName}
           />
           <div>
             <h3 className="text-sm font-semibold text-gray-900">
-              {activeChat.customer.name}
+              {customerName}
             </h3>
             <p className="text-xs text-gray-500">
               {getOnlineStatusText(activeChat.customer.onlineStatus)}
@@ -263,7 +260,6 @@ export function ChatWindowSection({
             new Date(prevMessage.createdAt).toDateString() !==
               currentDate.toDateString();
 
-          const avatar = isAgent ? agentAvatar : customerAvatar;
           const timeStr = currentDate.toLocaleTimeString([], {
             hour: "2-digit",
             minute: "2-digit",
@@ -323,22 +319,20 @@ export function ChatWindowSection({
                       <span className="text-xs text-gray-400">{timeStr}</span>
                     </div>
                   </div>
-                  <Image
-                    src={avatar}
-                    alt="Agent"
-                    width={32}
-                    height={32}
-                    className="w-8 h-8 rounded-full object-cover shrink-0"
+                  <AvatarWithInitials
+                    name={agentName}
+                    src={activeChat.agent?.avatar}
+                    size={32}
+                    alt={agentName}
                   />
                 </div>
               ) : (
                 <div className="flex gap-3">
-                  <Image
-                    src={avatar}
-                    alt={activeChat.customer.name}
-                    width={32}
-                    height={32}
-                    className="w-8 h-8 rounded-full object-cover shrink-0"
+                  <AvatarWithInitials
+                    name={customerName}
+                    src={activeChat.customer.avatar}
+                    size={32}
+                    alt={customerName}
                   />
                   <div className="flex-1">
                     {message.attachments && message.attachments.length > 0 && (

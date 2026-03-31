@@ -1,9 +1,9 @@
 "use client";
 
-import Image from "next/image";
 import { useState } from "react";
 import { FiSearch } from "react-icons/fi";
-import type { Chat } from "../../lib/chat/types";
+import { AvatarWithInitials } from "../atoms/AvatarWithInitials";
+import type { Chat, User } from "../../lib/chat/types";
 
 interface Props {
   queue: Chat[];
@@ -12,8 +12,6 @@ interface Props {
   onSelectChat: (chatId: string) => void;
   onClaimChat: (chatId: string) => void;
 }
-
-const DEFAULT_CUSTOMER_AVATAR = "/assets/images/avatarCustomer.jpg";
 
 function formatTime(dateString: string): string {
   const date = new Date(dateString);
@@ -28,6 +26,30 @@ function formatTime(dateString: string): string {
     return "Yesterday";
   }
   return date.toLocaleDateString([], { month: "short", day: "numeric" });
+}
+
+function customerSearchHaystack(customer: User): string {
+  const parts = [
+    customer.name,
+    customer.email,
+    customer.phone,
+    customer.city,
+    customer.country,
+    customer.region,
+  ];
+  return parts
+    .filter((v) => v != null && String(v).trim() !== "")
+    .map((v) => String(v).toLowerCase())
+    .join(" ");
+}
+
+/** Match if every whitespace-separated term appears somewhere in name, email, phone, city, country, or region. */
+function chatMatchesCustomerSearch(chat: Chat, query: string): boolean {
+  const q = query.trim().toLowerCase();
+  if (!q) return true;
+  const haystack = customerSearchHaystack(chat.customer);
+  const terms = q.split(/\s+/).filter(Boolean);
+  return terms.every((term) => haystack.includes(term));
 }
 
 function OnlineIndicator({ status }: { status?: string }) {
@@ -56,11 +78,11 @@ export function ChatSidebarSection({
   const [myChatsSearch, setMyChatsSearch] = useState("");
 
   const filteredQueue = queue.filter((chat) =>
-    chat.customer.name.toLowerCase().includes(queueSearch.toLowerCase()),
+    chatMatchesCustomerSearch(chat, queueSearch),
   );
 
   const filteredMyChats = myChats.filter((chat) =>
-    chat.customer.name.toLowerCase().includes(myChatsSearch.toLowerCase()),
+    chatMatchesCustomerSearch(chat, myChatsSearch),
   );
 
   return (
@@ -78,7 +100,7 @@ export function ChatSidebarSection({
             <FiSearch className="absolute left-3 top-1/2 -translate-y-1/2 text-gray-400 w-3.5 h-3.5" />
             <input
               type="text"
-              placeholder="Search queue..."
+              placeholder="Name, email, phone, city, country…"
               value={queueSearch}
               onChange={(e) => setQueueSearch(e.target.value)}
               className="w-full pl-8 pr-3 py-2 bg-gray-50 border border-gray-200 rounded-md text-sm focus:outline-none focus:ring-1 focus:ring-brand-500 focus:border-brand-500"
@@ -88,9 +110,11 @@ export function ChatSidebarSection({
 
         <div className="flex-1 overflow-y-auto p-2">
           {filteredQueue.map((chat) => {
-            const timeLabel = chat.lastMessage
-              ? formatTime(chat.lastMessage.createdAt)
-              : formatTime(chat.createdAt);
+            const timeLabel =
+              chat.messageTimeDisplay ??
+              (chat.lastMessage
+                ? formatTime(chat.lastMessage.createdAt)
+                : formatTime(chat.createdAt));
 
             return (
               <button
@@ -100,12 +124,10 @@ export function ChatSidebarSection({
                 className="w-full text-left flex items-start gap-3 p-3 rounded-lg hover:bg-gray-50 cursor-pointer border border-transparent mb-1 transition-colors"
               >
                 <div className="relative shrink-0">
-                  <Image
-                    src={chat.customer.avatar || DEFAULT_CUSTOMER_AVATAR}
-                    alt={chat.customer.name}
-                    width={40}
-                    height={40}
-                    className="w-10 h-10 rounded-full object-cover"
+                  <AvatarWithInitials
+                    name={chat.customer.name}
+                    src={chat.customer.avatar}
+                    size={40}
                   />
                   <OnlineIndicator status={chat.customer.onlineStatus} />
                 </div>
@@ -149,7 +171,7 @@ export function ChatSidebarSection({
             <FiSearch className="absolute left-3 top-1/2 -translate-y-1/2 text-gray-400 w-3.5 h-3.5" />
             <input
               type="text"
-              placeholder="Search my chats..."
+              placeholder="Name, email, phone, city, country…"
               value={myChatsSearch}
               onChange={(e) => setMyChatsSearch(e.target.value)}
               className="w-full pl-8 pr-3 py-2 bg-gray-50 border border-gray-200 rounded-md text-sm focus:outline-none focus:ring-1 focus:ring-brand-500 focus:border-brand-500"
@@ -160,9 +182,11 @@ export function ChatSidebarSection({
         <div className="flex-1 overflow-y-auto p-2">
           {filteredMyChats.map((chat) => {
             const isActive = chat.id === activeChatId;
-            const timeLabel = chat.lastMessage
-              ? formatTime(chat.lastMessage.createdAt)
-              : "";
+            const timeLabel =
+              chat.messageTimeDisplay ??
+              (chat.lastMessage
+                ? formatTime(chat.lastMessage.createdAt)
+                : "");
 
             return (
               <button
@@ -177,12 +201,10 @@ export function ChatSidebarSection({
                 }
               >
                 <div className="relative shrink-0">
-                  <Image
-                    src={chat.customer.avatar || DEFAULT_CUSTOMER_AVATAR}
-                    alt={chat.customer.name}
-                    width={40}
-                    height={40}
-                    className="w-10 h-10 rounded-full object-cover"
+                  <AvatarWithInitials
+                    name={chat.customer.name}
+                    src={chat.customer.avatar}
+                    size={40}
                   />
                   <OnlineIndicator status={chat.customer.onlineStatus} />
                 </div>

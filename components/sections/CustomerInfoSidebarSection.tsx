@@ -1,15 +1,13 @@
 "use client";
 
-import Image from "next/image";
 import { FiMail, FiPhone, FiClock, FiShoppingCart, FiTag, FiX } from "react-icons/fi";
+import { AvatarWithInitials } from "../atoms/AvatarWithInitials";
 import type { User } from "../../lib/chat/types";
 
 interface Props {
   customer: User | null;
   onClose: () => void;
 }
-
-const DEFAULT_CUSTOMER_AVATAR = "/assets/images/avatarCustomer.jpg";
 
 interface ActivityItem {
   id: string;
@@ -34,7 +32,6 @@ const recentActivity: ActivityItem[] = [
 ];
 
 export function CustomerInfoSidebarSection({ customer, onClose }: Props) {
-  const avatar = customer?.avatar || DEFAULT_CUSTOMER_AVATAR;
   const localTime = new Date().toLocaleTimeString([], {
     hour: "numeric",
     minute: "2-digit",
@@ -54,12 +51,12 @@ export function CustomerInfoSidebarSection({ customer, onClose }: Props) {
 
       {/* Profile Header */}
       <div className="p-5 pt-10 border-b border-gray-100 flex flex-col items-center text-center">
-        <Image
-          src={avatar}
+        <AvatarWithInitials
+          name={customer?.name ?? "?"}
+          src={customer?.avatar}
+          size={80}
+          className="border-4 border-white shadow-sm mb-3"
           alt={customer?.name ?? "Customer"}
-          width={80}
-          height={80}
-          className="w-20 h-20 rounded-full object-cover border-4 border-white shadow-sm mb-3"
         />
         <h3 className="font-semibold text-gray-900">
           {customer?.name ?? "No customer selected"}

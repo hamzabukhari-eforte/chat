@@ -1,14 +1,14 @@
 import { createServer } from "http";
-import { WebSocketServer } from "ws";
+import { WebSocketServer, type WebSocket } from "ws";
 import { randomUUID } from "crypto";
 import type { Chat, Message, IncomingEvent, OutgoingEvent, User } from "../chat/types";
 
 const httpServer = createServer();
 const wss = new WebSocketServer({ server: httpServer });
 
-const clients = new Map<any, User>();
+const clients = new Map<WebSocket, User>();
 let chats: Chat[] = [];
-let messages: Message[] = [];
+const messages: Message[] = [];
 
 function broadcast(event: IncomingEvent) {
   const data = JSON.stringify(event);
@@ -18,6 +18,39 @@ function broadcast(event: IncomingEvent) {
     }
   }
 }
+
+function lastMessageForChat(chatId: string): Message | undefined {
+  const forChat = messages.filter((m) => m.chatId === chatId);
+  if (!forChat.length) return undefined;
+  return forChat.reduce((a, b) =>
+    new Date(a.createdAt) > new Date(b.createdAt) ? a : b,
+  );
+}
+
+const corsHeaders: Record<string, string> = {
+  "Access-Control-Allow-Origin": "*",
+  "Access-Control-Allow-Methods": "GET, OPTIONS",
+  "Access-Control-Allow-Headers": "Content-Type",
+};
+
+httpServer.on("request", (req, res) => {
+  if (req.method === "OPTIONS") {
+    res.writeHead(204, corsHeaders);
+    res.end();
+    return;
+  }
+  if (req.method === "GET" && req.url?.startsWith("/api/chat-sync")) {
+    const chatsWithLast: Chat[] = chats.map((c) => ({
+      ...c,
+      lastMessage: lastMessageForChat(c.id),
+    }));
+    res.writeHead(200, { "Content-Type": "application/json", ...corsHeaders });
+    res.end(JSON.stringify({ chats: chatsWithLast, messages }));
+    return;
+  }
+  res.writeHead(404, corsHeaders);
+  res.end();
+});
 
 wss.on("connection", (socket) => {
   socket.on("message", (data) => {
@@ -98,7 +131,8 @@ wss.on("connection", (socket) => {
 });
 
 httpServer.listen(3030, () => {
-  // eslint-disable-next-line no-console
-  console.log("WebSocket chat server listening on ws://localhost:3030");
+  console.log(
+    "Chat server: ws://localhost:3030 | GET http://localhost:3030/api/chat-sync",
+  );
 });
 

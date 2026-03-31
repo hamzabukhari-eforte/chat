@@ -11,6 +11,9 @@ export interface User {
   avatar?: string;
   email?: string;
   phone?: string;
+  city?: string;
+  country?: string;
+  region?: string;
   plan?: string;
   onlineStatus?: OnlineStatus;
 }
@@ -22,6 +25,10 @@ export interface Chat {
   status: ChatStatus;
   lastMessage?: Message;
   createdAt: string;
+  /** Raw time from API for display (e.g. "3/21/26"); when set, sidebar uses this instead of formatting createdAt. */
+  messageTimeDisplay?: string;
+  /** WhatsApp / SES chat index for `loadConversationById` API. */
+  whatsappChatIndex?: string | number;
 }
 
 export interface Attachment {

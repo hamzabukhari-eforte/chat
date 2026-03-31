@@ -5,7 +5,7 @@ import { AnimatePresence, motion } from "framer-motion";
 import { useAuth } from "../../hooks/useAuth";
 import { useWebSocketChat } from "../../hooks/useWebSocketChat";
 import {
-  ChannelDrawerSection,
+  // ChannelDrawerSection,
   type ChannelId,
 } from "./ChannelDrawerSection";
 import { ChatSidebarSection } from "./ChatSidebarSection";
@@ -55,10 +55,10 @@ export function AgentDashboard() {
 
   return (
     <div className="flex h-full min-h-0 w-full flex-1 overflow-hidden">
-      <ChannelDrawerSection
+      {/* <ChannelDrawerSection
         activeChannel={activeChannel}
         onChannelChange={setActiveChannel}
-      />
+      /> */}
 
       {activeChannel === "webchat" ? (
         <>
@@ -67,7 +67,10 @@ export function AgentDashboard() {
             myChats={chat.myChats}
             activeChatId={chat.activeChatId}
             onSelectChat={chat.selectChat}
-            onClaimChat={chat.claimChat}
+            onClaimChat={(chatId) => {
+              chat.claimChat(chatId);
+              chat.selectChat(chatId);
+            }}
           />
           <ChatWindowSection
             activeChat={chat.activeChat}
