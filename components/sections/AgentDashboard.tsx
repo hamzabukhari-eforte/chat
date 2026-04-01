@@ -2,7 +2,6 @@
 
 import { useState } from "react";
 import { AnimatePresence, motion } from "framer-motion";
-import { useAuth } from "../../hooks/useAuth";
 import { useWebSocketChat } from "../../hooks/useWebSocketChat";
 import {
   // ChannelDrawerSection,
@@ -38,20 +37,17 @@ const CHANNEL_PLACEHOLDER: Record<
   },
 };
 
+const STATIC_AGENT = {
+  id: "mahnoor.z",
+  name: "Mahnoor",
+  role: "agent" as const,
+};
+
 export function AgentDashboard() {
-  const { user } = useAuth();
   const [showCustomerInfo, setShowCustomerInfo] = useState(false);
   const [activeChannel, setActiveChannel] = useState<ChannelId>("webchat");
 
-  const chat = useWebSocketChat(
-    user
-      ? {
-          id: user.id,
-          name: user.name,
-          role: user.role,
-        }
-      : null,
-  );
+  const chat = useWebSocketChat(STATIC_AGENT);
 
   return (
     <div className="flex h-full min-h-0 w-full flex-1 overflow-hidden">
@@ -67,10 +63,7 @@ export function AgentDashboard() {
             myChats={chat.myChats}
             activeChatId={chat.activeChatId}
             onSelectChat={chat.selectChat}
-            onClaimChat={(chatId) => {
-              chat.claimChat(chatId);
-              chat.selectChat(chatId);
-            }}
+            onClaimChat={chat.claimChat}
           />
           <ChatWindowSection
             activeChat={chat.activeChat}

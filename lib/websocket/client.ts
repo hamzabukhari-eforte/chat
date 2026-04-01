@@ -1,14 +1,40 @@
 import type { IncomingEvent, OutgoingEvent } from "../chat/types";
 
 type Listener = (event: IncomingEvent) => void;
+type InitializerPayload = object;
+
+function getDefaultWebSocketUrl(): string {
+  // During build/static export there is no window; return a placeholder.
+  if (typeof window === "undefined") {
+    return "ws://localhost:3030";
+  }
+
+  const isHttps = window.location.protocol === "https:";
+  const protocol = isHttps ? "wss:" : "ws:";
+  const host = window.location.host; // includes hostname + :port
+
+  // Adjust the path to match your backend WS endpoint.
+  // Currently using /SES/WebLiveChat as provided by backend.
+  const path = "/SES/WebLiveChat";
+
+  return `${protocol}//${host}${path}`;
+}
 
 export class ChatWebSocketClient {
   private socket: WebSocket | null = null;
   private listeners = new Set<Listener>();
   private url: string;
+  private initializer: InitializerPayload | null = null;
 
-  constructor(url = "ws://localhost:3030") {
+  constructor(url = getDefaultWebSocketUrl()) {
     this.url = url;
+  }
+
+  setInitializer(initializer: InitializerPayload | null) {
+    this.initializer = initializer;
+    if (initializer && this.socket?.readyState === WebSocket.OPEN) {
+      this.socket.send(JSON.stringify(initializer));
+    }
   }
 
   connect() {
@@ -19,8 +45,10 @@ export class ChatWebSocketClient {
 
     this.socket = new WebSocket(this.url);
     this.socket.onopen = () => {
-      // eslint-disable-next-line no-console
       console.log("[ws] connected to", this.url);
+      if (this.initializer) {
+        this.socket?.send(JSON.stringify(this.initializer));
+      }
     };
     this.socket.onmessage = (event) => {
       try {
@@ -31,12 +59,10 @@ export class ChatWebSocketClient {
       }
     };
     this.socket.onerror = (error) => {
-      // eslint-disable-next-line no-console
       console.error("[ws] error", error);
     };
     this.socket.onclose = () => {
       // very naive reconnect
-      // eslint-disable-next-line no-console
       console.warn("[ws] disconnected, retrying in 2s");
       setTimeout(() => this.connect(), 2000);
     };

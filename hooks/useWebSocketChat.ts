@@ -3,12 +3,24 @@
 import { useEffect, useMemo, useState } from "react";
 import { ChatWebSocketClient } from "../lib/websocket/client";
 import type { Attachment, Chat, Message, User } from "../lib/chat/types";
+import { toast } from "sonner";
 
 const DEFAULT_QUEUE_CHATS_URL =
   "http://10.0.10.53:8080/SES/SocialMedia/whatsapp/getQueueNAssignedChats";
 
 const DEFAULT_LOAD_CONVERSATION_URL =
   "http://10.0.10.53:8080/SES/SocialMedia/whatsapp/loadConversationById";
+const DEFAULT_ASSIGN_CHAT_URL =
+  "http://10.0.10.53:8080/SES/SocialMedia/whatsapp/assignChat";
+const DEFAULT_CHAT_WS_URL = "ws://10.0.10.53:8080/SES/WebLiveChat";
+
+function getChatWebSocketUrl(): string {
+  const fromEnv =
+    typeof process !== "undefined" && process.env.NEXT_PUBLIC_CHAT_WS_URL
+      ? process.env.NEXT_PUBLIC_CHAT_WS_URL
+      : undefined;
+  return fromEnv ?? DEFAULT_CHAT_WS_URL;
+}
 
 function getLoadConversationUrl(): string {
   const fromEnv =
@@ -27,6 +39,14 @@ function getQueueChatsUrl(): string {
   return (fromEnv ?? DEFAULT_QUEUE_CHATS_URL).replace(/\/$/, "");
 }
 
+function getAssignChatUrl(): string {
+  const fromEnv =
+    typeof process !== "undefined" && process.env.NEXT_PUBLIC_ASSIGN_CHAT_URL
+      ? process.env.NEXT_PUBLIC_ASSIGN_CHAT_URL
+      : undefined;
+  return (fromEnv ?? DEFAULT_ASSIGN_CHAT_URL).replace(/\/$/, "");
+}
+
 interface QueueNAssignedRow {
   number: string;
   messageTime: string;
@@ -42,10 +62,22 @@ interface QueueNAssignedRow {
 }
 
 interface QueueNAssignedChatsResponse {
+  domainIndex?: number;
+  chatFrom?: number;
+  userId?: string;
   queueChats: QueueNAssignedRow[];
   queueCount: number;
   assignedCount: number;
   assignedChats: QueueNAssignedRow[];
+}
+
+interface BackendWsInitializer {
+  chatroomId: "0";
+  userId: string;
+  type: "initializer";
+  From: "Agent";
+  domainIndex: number;
+  chatFrom: number;
 }
 
 function parseMessageTime(raw: string): string {
@@ -190,11 +222,13 @@ async function fetchConversationByChatIndex(
   agentUserId: string,
   customerId: string,
 ): Promise<Message[]> {
-  const res = await fetch(getLoadConversationUrl(), {
-    method: "POST",
-    headers: { "Content-Type": "application/json" },
+  const url = new URL(getLoadConversationUrl());
+  url.searchParams.set("chatIndex", String(chatIndex));
+  url.searchParams.set("Userid", agentUserId);
+
+  const res = await fetch(url.toString(), {
+    method: "GET",
     credentials: "omit",
-    body: JSON.stringify({ chatIndex }),
   });
   if (!res.ok) {
     throw new Error(`loadConversation failed: ${res.status}`);
@@ -203,9 +237,17 @@ async function fetchConversationByChatIndex(
   return parseLoadConversationMessages(json, chatId, agentUserId, customerId);
 }
 
-async function fetchQueueAndAssignedChats(agent: User): Promise<Chat[]> {
-  const res = await fetch(getQueueChatsUrl(), {
-    method: "GET",
+async function fetchQueueAndAssignedChats(agent: User): Promise<{
+  chats: Chat[];
+  initializer: BackendWsInitializer | null;
+  domainIndex: number | null;
+  chatFrom: number | null;
+}> {
+  const url = new URL(getQueueChatsUrl());
+  url.searchParams.set("Userid", agent.id);
+
+  const res = await fetch(url.toString(), {
+    method: "POST",
     credentials: "omit",
   });
   if (!res.ok) {
@@ -218,19 +260,78 @@ async function fetchQueueAndAssignedChats(agent: User): Promise<Chat[]> {
   const assigned = (data.assignedChats ?? []).map((r) =>
     mapQueueRowToChat(r, "assigned", agent),
   );
-  return [...queue, ...assigned];
+  const initializer =
+    data.userId && data.domainIndex !== undefined && data.chatFrom !== undefined
+      ? {
+          chatroomId: "0" as const,
+          userId: String(data.userId),
+          type: "initializer" as const,
+          From: "Agent" as const,
+          domainIndex: Number(data.domainIndex),
+          chatFrom: Number(data.chatFrom),
+        }
+      : null;
+
+  return {
+    chats: [...queue, ...assigned],
+    initializer,
+    domainIndex:
+      data.domainIndex !== undefined ? Number(data.domainIndex) : null,
+    chatFrom: data.chatFrom !== undefined ? Number(data.chatFrom) : null,
+  };
+}
+
+function parseAssignStatus(json: unknown): number | null {
+  if (typeof json === "number") return json;
+  if (!json || typeof json !== "object") return null;
+  const obj = json as Record<string, unknown>;
+  const raw = obj.status ?? obj.assignStatus ?? obj.code ?? obj.result;
+  if (typeof raw === "number") return raw;
+  if (typeof raw === "string") {
+    const n = Number(raw);
+    return Number.isFinite(n) ? n : null;
+  }
+  return null;
+}
+
+async function assignChatToAgent(
+  chatIndex: string | number,
+  domainIndex: number,
+  chatFrom: number,
+  userId: string,
+): Promise<number | null> {
+  const url = new URL(getAssignChatUrl());
+  url.searchParams.set("Userid", userId);
+  const res = await fetch(url.toString(), {
+    method: "POST",
+    credentials: "omit",
+    body: JSON.stringify({
+      chatIndex,
+      domainIndex,
+      chatFrom,
+    }),
+  });
+  if (!res.ok) {
+    throw new Error(`assignChat failed: ${res.status}`);
+  }
+  const json: unknown = await res.json();
+  return parseAssignStatus(json);
 }
 
 interface State {
   chats: Chat[];
   messages: Message[];
   activeChatId: string | null;
+  domainIndex: number | null;
+  chatFrom: number | null;
 }
 
 const initialState: State = {
   chats: [],
   messages: [],
   activeChatId: null,
+  domainIndex: null,
+  chatFrom: null,
 };
 
 function mergeChatsById(prev: Chat[], incoming: Chat[]): Chat[] {
@@ -244,19 +345,25 @@ function mergeChatsById(prev: Chat[], incoming: Chat[]): Chat[] {
 export function useWebSocketChat(currentUser: User | null) {
   const [state, setState] = useState<State>(initialState);
 
-  const client = useMemo(() => new ChatWebSocketClient(), []);
+  const client = useMemo(
+    () => new ChatWebSocketClient(getChatWebSocketUrl()),
+    [],
+  );
 
   useEffect(() => {
     if (!currentUser || currentUser.role !== "agent") return;
 
     let cancelled = false;
     fetchQueueAndAssignedChats(currentUser)
-      .then((apiChats) => {
+      .then((result) => {
         if (cancelled) return;
+        client.setInitializer(result.initializer);
         setState((prev) => ({
-          chats: mergeChatsById(prev.chats, apiChats),
+          chats: mergeChatsById(prev.chats, result.chats),
           messages: prev.messages,
           activeChatId: prev.activeChatId,
+          domainIndex: result.domainIndex ?? prev.domainIndex,
+          chatFrom: result.chatFrom ?? prev.chatFrom,
         }));
       })
       .catch(() => {
@@ -266,7 +373,7 @@ export function useWebSocketChat(currentUser: User | null) {
     return () => {
       cancelled = true;
     };
-  }, [currentUser?.id, currentUser?.role]); // eslint-disable-line react-hooks/exhaustive-deps -- refetch on identity/role only
+  }, [client, currentUser?.id, currentUser?.role]); // eslint-disable-line react-hooks/exhaustive-deps -- refetch on identity/role only
 
   const conversationLoadKey = useMemo(() => {
     if (!state.activeChatId) return null;
@@ -403,6 +510,7 @@ export function useWebSocketChat(currentUser: User | null) {
 
   useEffect(() => {
     if (!currentUser) return;
+    if (currentUser.role === "agent") return;
     client.send({ type: "login", payload: { user: currentUser } });
   }, [client, currentUser]);
 
@@ -437,12 +545,51 @@ export function useWebSocketChat(currentUser: User | null) {
     });
   };
 
-  const claimChat = (chatId: string) => {
+  const claimChat = async (chatId: string) => {
     if (!currentUser) return;
-    client.send({
-      type: "agent-claim-chat",
-      payload: { chatId, agent: currentUser },
-    });
+    const chat = state.chats.find((c) => c.id === chatId);
+    if (!chat || chat.status !== "queued") return;
+    if (chat.whatsappChatIndex === undefined || chat.whatsappChatIndex === null) {
+      toast.error("Unable to assign this chat right now.");
+      return;
+    }
+    if (state.domainIndex === null || state.chatFrom === null) {
+      toast.error("Unable to assign this chat right now.");
+      return;
+    }
+
+    try {
+      const status = await assignChatToAgent(
+        chat.whatsappChatIndex,
+        state.domainIndex,
+        state.chatFrom,
+        currentUser.id,
+      );
+      if (status === 2) {
+        toast.error("This chat is already assigned to another agent.");
+        return;
+      }
+      if (status !== 1) {
+        toast.error("Unable to assign this chat right now.");
+        return;
+      }
+
+      setState((prev) => ({
+        ...prev,
+        activeChatId: chatId,
+        chats: prev.chats.map((c) =>
+          c.id === chatId ? { ...c, status: "assigned", agent: currentUser } : c,
+        ),
+      }));
+
+      // Keep websocket state in sync for other listeners.
+      client.send({
+        type: "agent-claim-chat",
+        payload: { chatId, agent: currentUser },
+      });
+    } catch {
+      toast.error("Unable to assign this chat right now.");
+    }
   };
 
   const sendMessage = (text: string, attachments?: Attachment[]) => {
