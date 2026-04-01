@@ -39,6 +39,12 @@ function getQueueChatsUrl(): string {
   return (fromEnv ?? DEFAULT_QUEUE_CHATS_URL).replace(/\/$/, "");
 }
 
+function shouldSendUserIdInParams(): boolean {
+  return (
+    typeof process !== "undefined" && process.env.NODE_ENV === "development"
+  );
+}
+
 function getAssignChatUrl(): string {
   const fromEnv =
     typeof process !== "undefined" && process.env.NEXT_PUBLIC_ASSIGN_CHAT_URL
@@ -224,7 +230,9 @@ async function fetchConversationByChatIndex(
 ): Promise<Message[]> {
   const url = new URL(getLoadConversationUrl());
   url.searchParams.set("chatIndex", String(chatIndex));
-  url.searchParams.set("Userid", agentUserId);
+  if (shouldSendUserIdInParams()) {
+    url.searchParams.set("Userid", agentUserId);
+  }
 
   const res = await fetch(url.toString(), {
     method: "GET",
@@ -244,7 +252,9 @@ async function fetchQueueAndAssignedChats(agent: User): Promise<{
   chatFrom: number | null;
 }> {
   const url = new URL(getQueueChatsUrl());
-  url.searchParams.set("Userid", agent.id);
+  if (shouldSendUserIdInParams()) {
+    url.searchParams.set("Userid", agent.id);
+  }
 
   const res = await fetch(url.toString(), {
     method: "POST",
@@ -301,7 +311,9 @@ async function assignChatToAgent(
   userId: string,
 ): Promise<number | null> {
   const url = new URL(getAssignChatUrl());
-  url.searchParams.set("Userid", userId);
+  if (shouldSendUserIdInParams()) {
+    url.searchParams.set("Userid", userId);
+  }
   const res = await fetch(url.toString(), {
     method: "POST",
     credentials: "omit",
