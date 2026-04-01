@@ -53,6 +53,7 @@ export class ChatWebSocketClient {
     this.socket.onmessage = (event) => {
       try {
         const parsed = JSON.parse(event.data) as IncomingEvent;
+        console.log("[ws] response", parsed);
         this.listeners.forEach((listener) => listener(parsed));
       } catch {
         // swallow
@@ -71,6 +72,11 @@ export class ChatWebSocketClient {
   send(event: OutgoingEvent) {
     if (!this.socket || this.socket.readyState !== WebSocket.OPEN) return;
     this.socket.send(JSON.stringify(event));
+  }
+
+  sendRaw(payload: Record<string, unknown>) {
+    if (!this.socket || this.socket.readyState !== WebSocket.OPEN) return;
+    this.socket.send(JSON.stringify(payload));
   }
 
   subscribe(listener: Listener) {

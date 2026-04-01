@@ -45,6 +45,10 @@ function shouldSendUserIdInParams(): boolean {
   );
 }
 
+function getApiFetchCredentials(): RequestCredentials {
+  return shouldSendUserIdInParams() ? "omit" : "include";
+}
+
 function getAssignChatUrl(): string {
   const fromEnv =
     typeof process !== "undefined" && process.env.NEXT_PUBLIC_ASSIGN_CHAT_URL
@@ -236,7 +240,7 @@ async function fetchConversationByChatIndex(
 
   const res = await fetch(url.toString(), {
     method: "GET",
-    credentials: "omit",
+    credentials: getApiFetchCredentials(),
   });
   if (!res.ok) {
     throw new Error(`loadConversation failed: ${res.status}`);
@@ -258,7 +262,7 @@ async function fetchQueueAndAssignedChats(agent: User): Promise<{
 
   const res = await fetch(url.toString(), {
     method: "POST",
-    credentials: "omit",
+    credentials: getApiFetchCredentials(),
   });
   if (!res.ok) {
     throw new Error(`Queue chats failed: ${res.status}`);
@@ -316,7 +320,7 @@ async function assignChatToAgent(
   }
   const res = await fetch(url.toString(), {
     method: "POST",
-    credentials: "omit",
+    credentials: getApiFetchCredentials(),
     body: JSON.stringify({
       chatIndex,
       domainIndex,
@@ -594,10 +598,12 @@ export function useWebSocketChat(currentUser: User | null) {
         ),
       }));
 
-      // Keep websocket state in sync for other listeners.
-      client.send({
-        type: "agent-claim-chat",
-        payload: { chatId, agent: currentUser },
+      client.sendRaw({
+        chatroomId: chatId,
+        userId: currentUser.id,
+        domainIndex: state.domainIndex,
+        chatFrom: state.chatFrom,
+        type: "ChatRequestAccepted",
       });
     } catch {
       toast.error("Unable to assign this chat right now.");
