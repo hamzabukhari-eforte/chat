@@ -3,6 +3,20 @@ import type { IncomingEvent, OutgoingEvent } from "../chat/types";
 type Listener = (event: IncomingEvent) => void;
 type InitializerPayload = object;
 
+function tryNormalizeBackendEvent(raw: unknown): IncomingEvent | null {
+  if (!raw || typeof raw !== "object") return null;
+  const o = raw as Record<string, unknown>;
+  const eventName = o.event;
+  if (typeof eventName !== "string") return null;
+  if (eventName.toUpperCase() !== "REMOVE_FROM_QUEUE") return null;
+  const message = o.message;
+  if (typeof message !== "string" || !message.trim()) return null;
+  return {
+    type: "remove-from-queue",
+    payload: { chatId: message.trim() },
+  };
+}
+
 function getDefaultWebSocketUrl(): string {
   // During build/static export there is no window; return a placeholder.
   if (typeof window === "undefined") {
@@ -52,7 +66,9 @@ export class ChatWebSocketClient {
     };
     this.socket.onmessage = (event) => {
       try {
-        const parsed = JSON.parse(event.data) as IncomingEvent;
+        const raw: unknown = JSON.parse(event.data);
+        const normalized = tryNormalizeBackendEvent(raw);
+        const parsed = (normalized ?? raw) as IncomingEvent;
         console.log("[ws] response", parsed);
         this.listeners.forEach((listener) => listener(parsed));
       } catch {

@@ -17,14 +17,9 @@ interface ActivityItem {
 }
 
 const recentActivity: ActivityItem[] = [
+
   {
     id: "1",
-    icon: "cart",
-    title: "Subscription Renewed",
-    date: "May 08th, 2025",
-  },
-  {
-    id: "2",
     icon: "ticket",
     title: "Ticket #64803 Closed",
     date: "Apr 22nd, 2025",
@@ -32,10 +27,10 @@ const recentActivity: ActivityItem[] = [
 ];
 
 export function CustomerInfoSidebarSection({ customer, onClose }: Props) {
-  const localTime = new Date().toLocaleTimeString([], {
-    hour: "numeric",
-    minute: "2-digit",
-  });
+  // const localTime = new Date().toLocaleTimeString([], {
+  //   hour: "numeric",
+  //   minute: "2-digit",
+  // });
 
   return (
     <aside className="w-72 min-w-72 bg-white border-l border-gray-200 flex flex-col h-full relative">
@@ -58,12 +53,12 @@ export function CustomerInfoSidebarSection({ customer, onClose }: Props) {
           className="border-4 border-white shadow-sm mb-3"
           alt={customer?.name ?? "Customer"}
         />
-        <h3 className="font-semibold text-gray-900">
+        <h3 className="font-semibold text-gray-900 mb-3">
           {customer?.name ?? "No customer selected"}
         </h3>
-        <p className="text-sm text-gray-500 mb-3">
+        {/* <p className="text-sm text-gray-500 mb-3">
           {customer?.plan ?? "Standard Plan"}
-        </p>
+        </p> */}
         <div className="flex gap-2">
           <button
             type="button"
@@ -100,10 +95,10 @@ export function CustomerInfoSidebarSection({ customer, onClose }: Props) {
                 {customer?.phone ?? "0813-0000-0000"}
               </span>
             </li>
-            <li className="flex items-start gap-3">
+            {/* <li className="flex items-start gap-3">
               <FiClock className="text-gray-400 mt-0.5 w-4 h-4 shrink-0" />
               <span className="text-gray-700">Local time: {localTime}</span>
-            </li>
+            </li> */}
           </ul>
         </div>
 

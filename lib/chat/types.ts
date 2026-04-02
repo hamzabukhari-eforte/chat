@@ -89,5 +89,9 @@ export type IncomingEvent =
   | {
       type: "chat-updated";
       payload: { chat: Chat };
+    }
+  | {
+      type: "remove-from-queue";
+      payload: { chatId: string };
     };
 

@@ -112,7 +112,7 @@ function mapQueueRowToChat(
   status: "queued" | "assigned",
   agentUser?: User,
 ): Chat {
-  const id = `wa-${String(row.chatIndex)}`;
+  const id = String(row.chatIndex);
   const customer: User = {
     id: row.email || row.number,
     name: row.userName?.trim() || row.number,
@@ -173,7 +173,7 @@ function mapApiRowToMessage(
   customerId: string,
 ): Message {
   const id = String(
-    row.id ?? row.messageId ?? row.msgId ?? `wa-msg-${chatId}-${index}`,
+    row.id ?? row.messageId ?? row.msgId ?? `${chatId}-${index}`,
   );
   const text = String(
     row.text ?? row.message ?? row.msg ?? row.body ?? row.content ?? "",
@@ -233,20 +233,28 @@ async function fetchConversationByChatIndex(
   customerId: string,
 ): Promise<Message[]> {
   const url = new URL(getLoadConversationUrl());
-  url.searchParams.set("chatIndex", String(chatIndex));
-  if (shouldSendUserIdInParams()) {
-    url.searchParams.set("Userid", agentUserId);
-  }
+  url.searchParams.set("Userid", agentUserId);
 
   const res = await fetch(url.toString(), {
-    method: "GET",
+    method: "POST",
     credentials: getApiFetchCredentials(),
+    body: JSON.stringify({ chatIndex }),
   });
   if (!res.ok) {
     throw new Error(`loadConversation failed: ${res.status}`);
   }
   const json: unknown = await res.json();
   return parseLoadConversationMessages(json, chatId, agentUserId, customerId);
+}
+
+/** SES `chatIndex` for APIs: prefer row index, else `chat.id` (also derived from chatIndex). */
+function getChatIndexForApi(chat: Chat): string | number | null {
+  if (chat.whatsappChatIndex !== undefined && chat.whatsappChatIndex !== null) {
+    return chat.whatsappChatIndex;
+  }
+  const raw = chat.id.trim();
+  if (!raw) return null;
+  return raw;
 }
 
 async function fetchQueueAndAssignedChats(agent: User): Promise<{
@@ -340,6 +348,8 @@ interface State {
   activeChatId: string | null;
   domainIndex: number | null;
   chatFrom: number | null;
+  /** Bumps on My Chats `selectChat` so `loadConversationById` can refetch (e.g. same chat re-click). */
+  conversationReloadNonce: number;
 }
 
 const initialState: State = {
@@ -348,6 +358,7 @@ const initialState: State = {
   activeChatId: null,
   domainIndex: null,
   chatFrom: null,
+  conversationReloadNonce: 0,
 };
 
 function mergeChatsById(prev: Chat[], incoming: Chat[]): Chat[] {
@@ -375,9 +386,8 @@ export function useWebSocketChat(currentUser: User | null) {
         if (cancelled) return;
         client.setInitializer(result.initializer);
         setState((prev) => ({
+          ...prev,
           chats: mergeChatsById(prev.chats, result.chats),
-          messages: prev.messages,
-          activeChatId: prev.activeChatId,
           domainIndex: result.domainIndex ?? prev.domainIndex,
           chatFrom: result.chatFrom ?? prev.chatFrom,
         }));
@@ -394,13 +404,10 @@ export function useWebSocketChat(currentUser: User | null) {
   const conversationLoadKey = useMemo(() => {
     if (!state.activeChatId) return null;
     const chat = state.chats.find((c) => c.id === state.activeChatId);
-    if (
-      chat?.whatsappChatIndex === undefined ||
-      chat?.whatsappChatIndex === null
-    ) {
-      return null;
-    }
-    return `${chat.id}:${String(chat.whatsappChatIndex)}`;
+    if (!chat) return null;
+    const idx = getChatIndexForApi(chat);
+    if (idx === null || String(idx) === "") return null;
+    return `${chat.id}:${String(idx)}`;
   }, [state.activeChatId, state.chats]);
 
   useEffect(() => {
@@ -409,16 +416,13 @@ export function useWebSocketChat(currentUser: User | null) {
     const chatId = state.activeChatId;
     if (!chatId) return;
     const chat = state.chats.find((c) => c.id === chatId);
-    if (
-      chat?.whatsappChatIndex === undefined ||
-      chat?.whatsappChatIndex === null
-    ) {
-      return;
-    }
+    if (!chat) return;
+    const chatIndex = getChatIndexForApi(chat);
+    if (chatIndex === null || String(chatIndex) === "") return;
 
     let cancelled = false;
     fetchConversationByChatIndex(
-      chat.whatsappChatIndex,
+      chatIndex,
       chatId,
       currentUser.id,
       chat.customer.id,
@@ -440,7 +444,13 @@ export function useWebSocketChat(currentUser: User | null) {
     return () => {
       cancelled = true;
     };
-  }, [conversationLoadKey, currentUser?.id, currentUser?.role]); // eslint-disable-line react-hooks/exhaustive-deps -- load when selected WhatsApp chat changes
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- fetch when selection key / reload nonce changes; avoids refetch when unrelated chat fields update
+  }, [
+    conversationLoadKey,
+    state.conversationReloadNonce,
+    currentUser?.id,
+    currentUser?.role,
+  ]);
 
   useEffect(() => {
     const userId = currentUser?.id;
@@ -512,6 +522,29 @@ export function useWebSocketChat(currentUser: User | null) {
                     }
                   : c,
               ),
+            };
+          }
+          case "remove-from-queue": {
+            const chatId = event.payload.chatId;
+            const matchesRemoved = (c: Chat) =>
+              c.status === "queued" &&
+              (String(c.id) === chatId ||
+                (c.whatsappChatIndex !== undefined &&
+                  String(c.whatsappChatIndex) === chatId));
+            if (!prev.chats.some(matchesRemoved)) return prev;
+
+            const removedIds = new Set(
+              prev.chats.filter(matchesRemoved).map((c) => c.id),
+            );
+            const clearingActive =
+              prev.activeChatId != null &&
+              removedIds.has(prev.activeChatId);
+
+            return {
+              ...prev,
+              chats: prev.chats.filter((c) => !matchesRemoved(c)),
+              activeChatId: clearingActive ? null : prev.activeChatId,
+              messages: prev.messages.filter((m) => !removedIds.has(m.chatId)),
             };
           }
           default:
@@ -633,7 +666,11 @@ export function useWebSocketChat(currentUser: User | null) {
   };
 
   const selectChat = (chatId: string) => {
-    setState((prev) => ({ ...prev, activeChatId: chatId }));
+    setState((prev) => ({
+      ...prev,
+      activeChatId: chatId,
+      conversationReloadNonce: prev.conversationReloadNonce + 1,
+    }));
   };
 
   return {
