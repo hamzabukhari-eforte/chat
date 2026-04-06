@@ -1,14 +1,37 @@
 "use client";
 
 import Image from "next/image";
-import { FormEvent, useCallback, useRef, useState } from "react";
+import {
+  FormEvent,
+  useCallback,
+  useEffect,
+  useMemo,
+  useRef,
+  useState,
+} from "react";
 import { FiInfo, FiSend, FiSmile, FiPaperclip, FiX, FiFile, FiMic } from "react-icons/fi";
+import {
+  FaFilePdf,
+  FaFileWord,
+  FaFileExcel,
+  FaFileCsv,
+  FaFileAlt,
+} from "react-icons/fa";
 import { AvatarWithInitials } from "../atoms/AvatarWithInitials";
 import { ChatAudioRecorder } from "../atoms/ChatAudioRecorder";
+import { ChatVideoPlayer } from "../atoms/ChatVideoPlayer";
+import { isVideoFile } from "../../lib/chat/fileAttachment";
 import { HiOutlineChatBubbleLeftRight } from "react-icons/hi2";
 import data from "@emoji-mart/data";
 import Picker from "@emoji-mart/react";
-import type { Chat, Message, Attachment } from "../../lib/chat/types";
+import { attachmentShouldRenderAsVideo } from "../../lib/chat/attachmentDisplay";
+import { stableMessageListKey } from "../../lib/chat/messageKey";
+import {
+  formatChatDateSeparatorLabel,
+  formatMessageTimeForDisplay,
+  messageGroupKeyFromHeader,
+} from "../../lib/chat/sesMessageTime";
+import type { Attachment, Chat, Message } from "../../lib/chat/types";
 
 interface Props {
   activeChat: Chat | null;
@@ -20,47 +43,23 @@ interface Props {
 }
 
 const ACCEPTED_IMAGE_TYPES = "image/jpeg,image/png,image/gif,image/webp";
+const ACCEPTED_VIDEO_TYPES = "video/mp4,video/quicktime,video/webm";
 const ACCEPTED_DOC_TYPES = ".pdf,.doc,.docx,.txt,.xls,.xlsx,.csv";
 
 interface FilePreview {
   id: string;
   file: File;
-  type: "image" | "document" | "audio";
+  type: "image" | "video" | "document" | "audio";
   previewUrl?: string;
 }
 
-function formatDayLabel(date: Date): string {
-  const now = new Date();
-  const startOfToday = new Date(now.getFullYear(), now.getMonth(), now.getDate());
-  const startOfYesterday = new Date(
-    now.getFullYear(),
-    now.getMonth(),
-    now.getDate() - 1,
-  );
-  const startOfTarget = new Date(
-    date.getFullYear(),
-    date.getMonth(),
-    date.getDate(),
-  );
-
-  const timePart = date.toLocaleTimeString([], {
-    hour: "numeric",
-    minute: "2-digit",
-  });
-
-  if (startOfTarget.getTime() === startOfToday.getTime()) {
-    return `Today, ${timePart}`;
-  }
-  if (startOfTarget.getTime() === startOfYesterday.getTime()) {
-    return `Yesterday, ${timePart}`;
-  }
-
-  const datePart = date.toLocaleDateString([], {
-    month: "short",
-    day: "numeric",
-    year: "numeric",
-  });
-  return `${datePart}, ${timePart}`;
+/** Prefer `messageHeader` + clock from the API (seconds stripped in the label); fallback to `createdAt`. */
+function dateSeparatorLabelFromMessage(message: Message): string {
+  const h = message.messageHeader?.trim();
+  const t = message.messageTime?.trim();
+  if (h && t) return `${h}, ${formatMessageTimeForDisplay(t)}`;
+  if (h) return h;
+  return formatChatDateSeparatorLabel(message.createdAt);
 }
 
 function getOnlineStatusText(status?: string): string {
@@ -75,6 +74,42 @@ function formatFileSize(bytes: number): string {
   return (bytes / (1024 * 1024)).toFixed(1) + " MB";
 }
 
+function getFileBaseName(fullName: string): string {
+  const n = (fullName || "").trim();
+  if (!n) return "";
+  // Handles cases like `/recattachments/.../file.pdf`
+  const parts = n.split(/[\\/]/);
+  return parts[parts.length - 1] || n;
+}
+
+function getFileExtension(fullName: string): string {
+  const base = getFileBaseName(fullName).toLowerCase();
+  const m = /\.([a-z0-9]+)$/i.exec(base);
+  return m?.[1] ?? "";
+}
+
+function getFileIcon(ext: string, className: string) {
+  switch (ext) {
+    case "pdf":
+      return <FaFilePdf className={className} />;
+    case "doc":
+    case "docx":
+    case "rtf":
+      return <FaFileWord className={className} />;
+    case "xls":
+    case "xlsx":
+    case "xlsm":
+      return <FaFileExcel className={className} />;
+    case "csv":
+      return <FaFileCsv className={className} />;
+    case "txt":
+      // no dedicated txt icon; fallback to generic document
+      return <FaFileAlt className={className} />;
+    default:
+      return <FaFileAlt className={className} />;
+  }
+}
+
 export function ChatWindowSection({
   activeChat,
   messages,
@@ -86,8 +121,30 @@ export function ChatWindowSection({
   const [draft, setDraft] = useState("");
   const [showEmojiPicker, setShowEmojiPicker] = useState(false);
   const [filePreviews, setFilePreviews] = useState<FilePreview[]>([]);
+  const [imagePreview, setImagePreview] = useState<{
+    url: string;
+    name: string;
+  } | null>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
   const emojiPickerRef = useRef<HTMLDivElement>(null);
+  const messagesScrollRef = useRef<HTMLDivElement>(null);
+
+  const messagesTailKey = useMemo(() => {
+    if (!messages.length) return "";
+    return stableMessageListKey(messages[messages.length - 1]);
+  }, [messages]);
+
+  useEffect(() => {
+    if (!activeChat?.id) return;
+    const el = messagesScrollRef.current;
+    if (!el) return;
+    const run = () => {
+      el.scrollTop = el.scrollHeight;
+    };
+    requestAnimationFrame(() => {
+      requestAnimationFrame(run);
+    });
+  }, [activeChat?.id, messages.length, messagesTailKey]);
 
   const handleEmojiSelect = (emoji: { native: string }) => {
     setDraft((prev) => prev + emoji.native);
@@ -111,13 +168,14 @@ export function ChatWindowSection({
 
     for (const file of Array.from(files)) {
       const isImage = file.type.startsWith("image/");
+      const isVideo = isVideoFile(file);
       const preview: FilePreview = {
         id: Math.random().toString(36).substring(7),
         file,
-        type: isImage ? "image" : "document",
+        type: isImage ? "image" : isVideo ? "video" : "document",
       };
 
-      if (isImage) {
+      if (isImage || isVideo) {
         preview.previewUrl = await fileToBase64(file);
       }
 
@@ -159,6 +217,26 @@ export function ChatWindowSection({
   const handleRecorderOpenChange = useCallback((recorderOpen: boolean) => {
     if (recorderOpen) setShowEmojiPicker(false);
   }, []);
+
+  useEffect(() => {
+    if (!imagePreview) return;
+    const onKeyDown = (e: KeyboardEvent) => {
+      if (e.key === "Escape") setImagePreview(null);
+    };
+    window.addEventListener("keydown", onKeyDown);
+    return () => window.removeEventListener("keydown", onKeyDown);
+  }, [imagePreview]);
+
+  const downloadAttachment = (att: Attachment) => {
+    if (!att.url) return;
+    const link = document.createElement("a");
+    link.href = att.url;
+    link.download = att.name || "download";
+    link.rel = "noopener noreferrer";
+    document.body.appendChild(link);
+    link.click();
+    link.remove();
+  };
 
   const handleSubmit = (event: FormEvent) => {
     event.preventDefault();
@@ -206,7 +284,7 @@ export function ChatWindowSection({
   );
 
   return (
-    <section className="flex-1 flex flex-col h-full bg-white">
+    <section className="flex min-h-0 flex-1 flex-col bg-white">
       {/* Header */}
       <div className="p-4 border-b border-gray-200 flex items-center justify-between shrink-0">
         <div className="flex items-center gap-3">
@@ -220,9 +298,9 @@ export function ChatWindowSection({
             <h3 className="text-sm font-semibold text-gray-900">
               {customerName}
             </h3>
-            <p className="text-xs text-gray-500">
+            {/* <p className="text-xs text-gray-500">
               {getOnlineStatusText(activeChat.customer.onlineStatus)}
-            </p>
+            </p> */}
           </div>
         </div>
         <div className="flex items-center gap-2">
@@ -250,27 +328,41 @@ export function ChatWindowSection({
       </div>
 
       {/* Messages */}
-      <div className="flex-1 overflow-y-auto p-6 space-y-4">
+      <div
+        ref={messagesScrollRef}
+        className="min-h-0 flex-1 space-y-4 overflow-y-auto p-6"
+      >
         {sortedMessages.map((message, index, arr) => {
           const isAgent = message.senderRole === "agent";
           const currentDate = new Date(message.createdAt);
           const prevMessage = index > 0 ? arr[index - 1] : null;
+          const groupKey = messageGroupKeyFromHeader(
+            message.messageHeader,
+            message.createdAt,
+          );
+          const prevGroupKey = prevMessage
+            ? messageGroupKeyFromHeader(
+                prevMessage.messageHeader,
+                prevMessage.createdAt,
+              )
+            : null;
           const shouldShowDate =
-            !prevMessage ||
-            new Date(prevMessage.createdAt).toDateString() !==
-              currentDate.toDateString();
+            !prevMessage || groupKey !== prevGroupKey;
 
-          const timeStr = currentDate.toLocaleTimeString([], {
-            hour: "2-digit",
-            minute: "2-digit",
-          });
+          const timeStr = message.messageTime?.trim()
+            ? formatMessageTimeForDisplay(message.messageTime)
+            : currentDate.toLocaleTimeString([], {
+                hour: "2-digit",
+                minute: "2-digit",
+              });
 
+          const datePillLabel = dateSeparatorLabelFromMessage(message);
           return (
-            <div key={message.id}>
-              {shouldShowDate && (
+            <div key={stableMessageListKey(message)}>
+              {shouldShowDate && datePillLabel && (
                 <div className="flex items-center justify-center my-4">
                   <span className="px-3 py-1 rounded-full bg-gray-100 text-[11px] text-gray-500 font-medium">
-                    {formatDayLabel(currentDate)}
+                    {datePillLabel}
                   </span>
                 </div>
               )}
@@ -281,16 +373,30 @@ export function ChatWindowSection({
                     {message.attachments && message.attachments.length > 0 && (
                       <div className="flex flex-wrap gap-2 mb-2 justify-end">
                         {message.attachments.map((att) => (
-                          <div key={att.id} className="relative">
-                            {att.type === "image" && att.url ? (
-                              <Image
-                                src={att.url}
-                                alt={att.name}
-                                width={200}
-                                height={150}
-                                unoptimized
-                                className="rounded-lg object-cover max-w-[200px] max-h-[150px]"
-                              />
+                          <div key={att.id} className="relative shrink-0">
+                            {attachmentShouldRenderAsVideo(att) && att.url ? (
+                              <ChatVideoPlayer url={att.url} maxWidth={280} />
+                            ) : att.type === "image" && att.url ? (
+                              <button
+                                type="button"
+                                onClick={() =>
+                                  setImagePreview({
+                                    url: att.url,
+                                    name: att.name,
+                                  })
+                                }
+                                aria-label={`Preview image: ${att.name}`}
+                                className="cursor-pointer"
+                              >
+                                <Image
+                                  src={att.url}
+                                  alt={att.name}
+                                  width={200}
+                                  height={150}
+                                  unoptimized
+                                  className="rounded-lg object-cover max-w-[200px] max-h-[150px] hover:opacity-90 transition-opacity"
+                                />
+                              </button>
                             ) : att.type === "audio" && att.url ? (
                               <audio
                                 src={att.url}
@@ -299,12 +405,32 @@ export function ChatWindowSection({
                                 preload="metadata"
                               />
                             ) : (
-                              <div className="flex items-center gap-2 bg-brand-400 text-white px-3 py-2 rounded-lg">
-                                <FiFile className="w-4 h-4" />
-                                <span className="text-sm truncate max-w-[150px]">
-                                  {att.name}
-                                </span>
-                              </div>
+                              <button
+                                type="button"
+                                onClick={() => downloadAttachment(att)}
+                                disabled={!att.url}
+                                className="flex items-center gap-2 bg-brand-400 text-white px-3 py-2 rounded-lg hover:bg-brand-500 transition-colors cursor-pointer disabled:opacity-60 disabled:cursor-not-allowed"
+                              >
+                                <div className="w-8 h-8 rounded-md bg-brand-300/30 flex items-center justify-center shrink-0">
+                                  {getFileIcon(
+                                    getFileExtension(att.name),
+                                    "w-5 h-5",
+                                  )}
+                                </div>
+                                <div className="flex flex-col min-w-0">
+                                  <span
+                                    className="text-sm font-medium truncate max-w-[180px]"
+                                    title={att.name}
+                                  >
+                                    {getFileBaseName(att.name)}
+                                  </span>
+                                  {getFileExtension(att.name) && (
+                                    <span className="text-[10px] text-white/80 uppercase leading-3">
+                                      {getFileExtension(att.name)}
+                                    </span>
+                                  )}
+                                </div>
+                              </button>
                             )}
                           </div>
                         ))}
@@ -338,16 +464,30 @@ export function ChatWindowSection({
                     {message.attachments && message.attachments.length > 0 && (
                       <div className="flex flex-wrap gap-2 mb-2">
                         {message.attachments.map((att) => (
-                          <div key={att.id} className="relative">
-                            {att.type === "image" && att.url ? (
-                              <Image
-                                src={att.url}
-                                alt={att.name}
-                                width={200}
-                                height={150}
-                                unoptimized
-                                className="rounded-lg object-cover max-w-[200px] max-h-[150px]"
-                              />
+                          <div key={att.id} className="relative shrink-0">
+                            {attachmentShouldRenderAsVideo(att) && att.url ? (
+                              <ChatVideoPlayer url={att.url} maxWidth={280} />
+                            ) : att.type === "image" && att.url ? (
+                              <button
+                                type="button"
+                                onClick={() =>
+                                  setImagePreview({
+                                    url: att.url,
+                                    name: att.name,
+                                  })
+                                }
+                                aria-label={`Preview image: ${att.name}`}
+                                className="cursor-pointer"
+                              >
+                                <Image
+                                  src={att.url}
+                                  alt={att.name}
+                                  width={200}
+                                  height={150}
+                                  unoptimized
+                                  className="rounded-lg object-cover max-w-[200px] max-h-[150px] hover:opacity-90 transition-opacity"
+                                />
+                              </button>
                             ) : att.type === "audio" && att.url ? (
                               <audio
                                 src={att.url}
@@ -356,12 +496,32 @@ export function ChatWindowSection({
                                 preload="metadata"
                               />
                             ) : (
-                              <div className="flex items-center gap-2 bg-gray-200 text-gray-700 px-3 py-2 rounded-lg">
-                                <FiFile className="w-4 h-4" />
-                                <span className="text-sm truncate max-w-[150px]">
-                                  {att.name}
-                                </span>
-                              </div>
+                              <button
+                                type="button"
+                                onClick={() => downloadAttachment(att)}
+                                disabled={!att.url}
+                                className="flex items-center gap-2 bg-gray-200 text-gray-700 px-3 py-2 rounded-lg hover:bg-gray-300 transition-colors cursor-pointer disabled:opacity-60 disabled:cursor-not-allowed"
+                              >
+                                <div className="w-8 h-8 rounded-md bg-gray-300 flex items-center justify-center shrink-0">
+                                  {getFileIcon(
+                                    getFileExtension(att.name),
+                                    "w-5 h-5 text-gray-700",
+                                  )}
+                                </div>
+                                <div className="flex flex-col min-w-0">
+                                  <span
+                                    className="text-sm font-medium truncate max-w-[180px]"
+                                    title={att.name}
+                                  >
+                                    {getFileBaseName(att.name)}
+                                  </span>
+                                  {getFileExtension(att.name) && (
+                                    <span className="text-[10px] text-gray-500 uppercase leading-3">
+                                      {getFileExtension(att.name)}
+                                    </span>
+                                  )}
+                                </div>
+                              </button>
                             )}
                           </div>
                         ))}
@@ -382,6 +542,46 @@ export function ChatWindowSection({
           );
         })}
       </div>
+
+      {/* Image preview overlay */}
+      {imagePreview && (
+        <div
+          className="fixed inset-0 z-50 flex items-center justify-center bg-black/55 p-4"
+          role="dialog"
+          aria-modal="true"
+          onMouseDown={(e) => {
+            if (e.currentTarget === e.target) setImagePreview(null);
+          }}
+        >
+          <div className="relative w-[40vw] h-[60vh] max-h-[700px] rounded-lg overflow-hidden bg-black">
+            <button
+              type="button"
+              onClick={() => setImagePreview(null)}
+              className="absolute top-3 right-3 z-50 w-10 h-10 rounded-full bg-white/90 hover:bg-white flex items-center justify-center cursor-pointer transition-colors shadow-sm focus:outline-none focus:ring-2 focus:ring-brand-500"
+              aria-label="Close image preview"
+            >
+              <FiX className="w-4 h-4 text-gray-700" />
+            </button>
+
+            <Image
+              src={imagePreview.url}
+              alt={imagePreview.name}
+              fill
+              unoptimized
+              sizes="90vw"
+              className="object-contain"
+            />
+
+            {imagePreview.name && (
+              <div className="mt-3 text-center">
+                <p className="text-sm text-white/90 truncate max-w-[90vw]">
+                  {imagePreview.name}
+                </p>
+              </div>
+            )}
+          </div>
+        </div>
+      )}
 
       {/* File Previews */}
       {filePreviews.length > 0 && (
@@ -413,6 +613,10 @@ export function ChatWindowSection({
                     unoptimized
                     className="w-12 h-12 rounded object-cover"
                   />
+                ) : fp.type === "video" && fp.previewUrl ? (
+                  <div className="w-[100px] shrink-0">
+                    <ChatVideoPlayer url={fp.previewUrl} maxWidth={100} />
+                  </div>
                 ) : (
                   <div className="w-12 h-12 rounded bg-gray-100 flex items-center justify-center">
                     <FiFile className="w-5 h-5 text-gray-400" />
@@ -451,7 +655,7 @@ export function ChatWindowSection({
                 ref={fileInputRef}
                 type="file"
                 multiple
-                accept={`${ACCEPTED_IMAGE_TYPES},${ACCEPTED_DOC_TYPES}`}
+                accept={`${ACCEPTED_IMAGE_TYPES},${ACCEPTED_VIDEO_TYPES},${ACCEPTED_DOC_TYPES}`}
                 onChange={handleFileSelect}
                 className="hidden"
                 id="file-upload"

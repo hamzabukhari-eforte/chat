@@ -1,22 +1,35 @@
 "use client";
 
 import Image from "next/image";
-import { FormEvent, useCallback, useRef, useState } from "react";
+import {
+  FormEvent,
+  useCallback,
+  useEffect,
+  useMemo,
+  useRef,
+  useState,
+} from "react";
 import { FiFile, FiMic, FiPaperclip, FiSend, FiSmile, FiX } from "react-icons/fi";
 import data from "@emoji-mart/data";
 import Picker from "@emoji-mart/react";
 import { useAuth } from "../../hooks/useAuth";
 import { useWebSocketChat } from "../../hooks/useWebSocketChat";
+import { attachmentShouldRenderAsVideo } from "../../lib/chat/attachmentDisplay";
+import { stableMessageListKey } from "../../lib/chat/messageKey";
+import { formatMessageTimeForDisplay } from "../../lib/chat/sesMessageTime";
 import type { Attachment, Message } from "../../lib/chat/types";
 import { ChatAudioRecorder } from "../atoms/ChatAudioRecorder";
+import { ChatVideoPlayer } from "../atoms/ChatVideoPlayer";
+import { isVideoFile } from "../../lib/chat/fileAttachment";
 
 const ACCEPTED_IMAGE_TYPES = "image/jpeg,image/png,image/gif,image/webp";
+const ACCEPTED_VIDEO_TYPES = "video/mp4,video/quicktime,video/webm";
 const ACCEPTED_DOC_TYPES = ".pdf,.doc,.docx,.txt,.xls,.xlsx,.csv";
 
 interface FilePreview {
   id: string;
   file: File;
-  type: "image" | "document" | "audio";
+  type: "image" | "video" | "document" | "audio";
   previewUrl?: string;
 }
 
@@ -38,8 +51,10 @@ function MessageAttachments({
   return (
     <div className="flex flex-wrap gap-2 mb-1">
       {message.attachments.map((att) => (
-        <div key={att.id}>
-          {att.type === "image" && att.url ? (
+        <div key={att.id} className="shrink-0">
+          {attachmentShouldRenderAsVideo(att) && att.url ? (
+            <ChatVideoPlayer url={att.url} maxWidth={280} />
+          ) : att.type === "image" && att.url ? (
             <Image
               src={att.url}
               alt={att.name}
@@ -91,6 +106,24 @@ export function CustomerChat() {
   const [filePreviews, setFilePreviews] = useState<FilePreview[]>([]);
   const fileInputRef = useRef<HTMLInputElement>(null);
   const emojiPickerRef = useRef<HTMLDivElement>(null);
+  const messagesScrollRef = useRef<HTMLDivElement>(null);
+
+  const messagesTailKey = useMemo(() => {
+    const list = chat.activeMessages;
+    if (!list.length) return "";
+    return stableMessageListKey(list[list.length - 1]);
+  }, [chat.activeMessages]);
+
+  useEffect(() => {
+    const el = messagesScrollRef.current;
+    if (!el) return;
+    const run = () => {
+      el.scrollTop = el.scrollHeight;
+    };
+    requestAnimationFrame(() => {
+      requestAnimationFrame(run);
+    });
+  }, [chat.activeChat?.id, chat.activeMessages.length, messagesTailKey]);
 
   const fileToBase64 = (file: File): Promise<string> =>
     new Promise((resolve, reject) => {
@@ -109,12 +142,13 @@ export function CustomerChat() {
     const newPreviews: FilePreview[] = [];
     for (const file of Array.from(files)) {
       const isImage = file.type.startsWith("image/");
+      const isVideo = isVideoFile(file);
       const preview: FilePreview = {
         id: Math.random().toString(36).substring(7),
         file,
-        type: isImage ? "image" : "document",
+        type: isImage ? "image" : isVideo ? "video" : "document",
       };
-      if (isImage) {
+      if (isImage || isVideo) {
         preview.previewUrl = await fileToBase64(file);
       }
       newPreviews.push(preview);
@@ -187,20 +221,23 @@ export function CustomerChat() {
   const canSend = draft.trim().length > 0 || filePreviews.length > 0;
 
   return (
-    <section className="flex-1 flex flex-col h-[80vh] bg-white w-full max-w-5xl mx-auto mb-20 justify-center my-auto">
+    <section className="my-auto mb-20 flex h-[80vh] max-w-5xl w-full flex-1 flex-col justify-center bg-white min-h-0">
       <div className="h-16 px-6 border-b border-gray-100 flex items-center justify-between bg-white/80">
         <h1 className="text-sm font-semibold text-gray-900">
           Customer Chat Demo
         </h1>
       </div>
 
-      <div className="flex-1 overflow-y-auto p-6 bg-[#f8fafc] flex flex-col gap-3">
+      <div
+        ref={messagesScrollRef}
+        className="min-h-0 flex-1 flex flex-col gap-3 overflow-y-auto bg-[#f8fafc] p-6"
+      >
         {chat.activeChat &&
           chat.activeMessages.map((message) => {
             const isMine = message.senderId === user?.id;
             return (
               <div
-                key={message.id}
+                key={stableMessageListKey(message)}
                 className={`flex items-start gap-2 max-w-[80%] ${
                   isMine ? "self-end flex-row-reverse" : ""
                 }`}
@@ -223,10 +260,12 @@ export function CustomerChat() {
                     </div>
                   ) : null}
                   <span className="text-[10px] text-gray-400">
-                    {new Date(message.createdAt).toLocaleTimeString([], {
-                      hour: "2-digit",
-                      minute: "2-digit",
-                    })}
+                    {message.messageTime?.trim()
+                      ? formatMessageTimeForDisplay(message.messageTime)
+                      : new Date(message.createdAt).toLocaleTimeString([], {
+                          hour: "2-digit",
+                          minute: "2-digit",
+                        })}
                   </span>
                 </div>
               </div>
@@ -269,6 +308,10 @@ export function CustomerChat() {
                     unoptimized
                     className="w-12 h-12 rounded object-cover"
                   />
+                ) : fp.type === "video" && fp.previewUrl ? (
+                  <div className="w-[100px] shrink-0">
+                    <ChatVideoPlayer url={fp.previewUrl} maxWidth={100} />
+                  </div>
                 ) : (
                   <div className="w-12 h-12 rounded bg-gray-100 flex items-center justify-center">
                     <FiFile className="w-5 h-5 text-gray-400" />
@@ -305,7 +348,7 @@ export function CustomerChat() {
               ref={fileInputRef}
               type="file"
               multiple
-              accept={`${ACCEPTED_IMAGE_TYPES},${ACCEPTED_DOC_TYPES}`}
+              accept={`${ACCEPTED_IMAGE_TYPES},${ACCEPTED_VIDEO_TYPES},${ACCEPTED_DOC_TYPES}`}
               onChange={handleFileSelect}
               className="hidden"
               id="customer-file-upload"

@@ -33,7 +33,7 @@ export interface Chat {
 
 export interface Attachment {
   id: string;
-  type: "image" | "document" | "audio";
+  type: "image" | "video" | "document" | "audio";
   name: string;
   url: string;
   size?: number;
@@ -41,12 +41,21 @@ export interface Attachment {
 }
 
 export interface Message {
-  id: string;
+  /** From API (`msgIndex`, etc.) when provided; omit for outbound / some WS payloads. */
+  id?: string;
   chatId: string;
   senderId: string;
   senderRole: Role;
   text: string;
+  /** ISO timestamp for ordering; may be derived when the server only sends a clock time. */
   createdAt: string;
+  /**
+   * Clock label from the API/WebSocket (e.g. `messageTime` / `msgtime`).
+   * May include seconds for ordering. UI: `formatMessageTimeForDisplay`. Send: `formatSesLocalMessageTime`.
+   */
+  messageTime?: string;
+  /** SES day bucket for grouping (e.g. "Today", "Yesterday", or a date string). */
+  messageHeader?: string;
   system?: boolean;
   attachments?: Attachment[];
 }
@@ -58,7 +67,15 @@ export type OutgoingEvent =
     }
   | {
       type: "customer-start-chat";
-      payload: { customer: User; text: string; attachments?: Attachment[] };
+      payload: {
+        customer: User;
+        text: string;
+        attachments?: Attachment[];
+        /** Local time with seconds for SES ordering (e.g. `9:50:15 AM`). */
+        messageTime?: string;
+        /** Same clock as `messageTime` when the SES backend expects `msgtime`. */
+        msgtime?: string;
+      };
     }
   | {
       type: "agent-claim-chat";
@@ -66,7 +83,16 @@ export type OutgoingEvent =
     }
   | {
       type: "send-message";
-      payload: { chatId: string; text: string; sender: User; attachments?: Attachment[] };
+      payload: {
+        chatId: string;
+        text: string;
+        sender: User;
+        attachments?: Attachment[];
+        /** Local time with seconds for SES ordering (e.g. `9:50:15 AM`). */
+        messageTime?: string;
+        /** Same clock as `messageTime` when the SES backend expects `msgtime`. */
+        msgtime?: string;
+      };
     }
   | {
       type: "resolve-chat";
@@ -93,5 +119,10 @@ export type IncomingEvent =
   | {
       type: "remove-from-queue";
       payload: { chatId: string };
+    }
+  | {
+      /** SES WebSocket `NEW_CHAT_IN_QUEUE` — same row shape as queue API after `getQueueNAssignedChats`. */
+      type: "new-chat-in-queue";
+      payload: { data: Record<string, unknown> };
     };
 

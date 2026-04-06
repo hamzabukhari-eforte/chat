@@ -1,6 +1,7 @@
 import { createServer } from "http";
 import { WebSocketServer, type WebSocket } from "ws";
 import { randomUUID } from "crypto";
+import { formatSesLocalMessageTime } from "../chat/sesMessageTime";
 import type { Chat, Message, IncomingEvent, OutgoingEvent, User } from "../chat/types";
 
 const httpServer = createServer();
@@ -72,13 +73,19 @@ wss.on("connection", (socket) => {
           status: "queued",
           createdAt: new Date().toISOString(),
         };
+        const now = new Date();
+        const messageTime =
+          event.payload.messageTime ??
+          event.payload.msgtime ??
+          formatSesLocalMessageTime(now);
         const msg: Message = {
           id: randomUUID(),
           chatId: chat.id,
           senderId: event.payload.customer.id,
           senderRole: "customer",
           text: event.payload.text,
-          createdAt: new Date().toISOString(),
+          createdAt: now.toISOString(),
+          messageTime,
           attachments: event.payload.attachments,
         };
         chats.push(chat);
@@ -99,13 +106,19 @@ wss.on("connection", (socket) => {
         break;
       }
       case "send-message": {
+        const now = new Date();
+        const messageTime =
+          event.payload.messageTime ??
+          event.payload.msgtime ??
+          formatSesLocalMessageTime(now);
         const msg: Message = {
           id: randomUUID(),
           chatId: event.payload.chatId,
           senderId: event.payload.sender.id,
           senderRole: event.payload.sender.role,
           text: event.payload.text,
-          createdAt: new Date().toISOString(),
+          createdAt: now.toISOString(),
+          messageTime,
           attachments: event.payload.attachments,
         };
         messages.push(msg);

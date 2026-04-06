@@ -1,6 +1,17 @@
 "use client";
 
 import { useEffect, useMemo, useState } from "react";
+import { messagesAreSameListItem, stableMessageListKey } from "../lib/chat/messageKey";
+import {
+  createdAtFromMessageHeaderAndTime,
+  formatMessageTimeForDisplay,
+  formatSesLocalMessageTime,
+  splitSesMessageHeader,
+} from "../lib/chat/sesMessageTime";
+import {
+  attachmentsFromSesFields,
+  stripSesPlaceholderCaption,
+} from "../lib/chat/sesMedia";
 import { ChatWebSocketClient } from "../lib/websocket/client";
 import type { Attachment, Chat, Message, User } from "../lib/chat/types";
 import { toast } from "sonner";
@@ -95,6 +106,19 @@ function parseMessageTime(raw: string): string {
   const direct = new Date(trimmed);
   if (!Number.isNaN(direct.getTime())) return direct.toISOString();
 
+  const ampm = /^(\d{1,2}):(\d{2})(?::(\d{2}))?\s*(AM|PM)$/i.exec(trimmed);
+  if (ampm) {
+    let h = Number(ampm[1]);
+    const min = Number(ampm[2]);
+    const sec = ampm[3] !== undefined ? Number(ampm[3]) : 0;
+    const ap = ampm[4].toUpperCase();
+    if (ap === "PM" && h !== 12) h += 12;
+    if (ap === "AM" && h === 12) h = 0;
+    const d = new Date();
+    d.setHours(h, min, sec, 0);
+    return d.toISOString();
+  }
+
   const m = /^(\d{1,2})\/(\d{1,2})\/(\d{2,4})$/.exec(trimmed);
   if (m) {
     const month = Number(m[1]) - 1;
@@ -144,9 +168,42 @@ function mapQueueRowToChat(
     status,
     lastMessage,
     createdAt: parseMessageTime(row.messageTime),
-    messageTimeDisplay: row.messageTime.trim() || undefined,
+    messageTimeDisplay:
+      row.messageTime.trim() !== ""
+        ? formatMessageTimeForDisplay(row.messageTime)
+        : undefined,
     whatsappChatIndex: row.chatIndex,
   };
+}
+
+function nullifyDash(v: unknown): string | null {
+  const s = String(v ?? "").trim();
+  if (!s || s === "-") return null;
+  return s;
+}
+
+/** SES `NEW_CHAT_IN_QUEUE` row → same shape as `getQueueNAssignedChats` queue rows. */
+function mapNewChatInQueueDataToChat(data: Record<string, unknown>): Chat | null {
+  const raw = data.chatId ?? data.chatIndex;
+  if (raw === undefined || raw === null) return null;
+  if (typeof raw !== "number" && typeof raw !== "string") return null;
+  const chatIndex: string | number = raw;
+  const lastChatTime = String(data.lastChatTime ?? "").trim();
+  const lastMsg =
+    String(data.lastMsg ?? "").trim() || lastChatTime;
+  const row: QueueNAssignedRow = {
+    number: String(data.number ?? ""),
+    messageTime: String(data.messageTime ?? ""),
+    country: nullifyDash(data.country),
+    city: nullifyDash(data.city),
+    profilePic: String(data.profilePic ?? ""),
+    lastMsg,
+    userName: String(data.userName ?? ""),
+    region: nullifyDash(data.region),
+    chatIndex,
+    email: String(data.email ?? ""),
+  };
+  return mapQueueRowToChat(row, "queued");
 }
 
 type LoadConversationApiRow = Record<string, unknown>;
@@ -172,21 +229,47 @@ function mapApiRowToMessage(
   agentUserId: string,
   customerId: string,
 ): Message {
-  const id = String(
-    row.id ?? row.messageId ?? row.msgId ?? `${chatId}-${index}`,
-  );
+  const idSource = row.msgIndex ?? row.id ?? row.messageId ?? row.msgId;
+  const id =
+    idSource !== undefined &&
+    idSource !== null &&
+    String(idSource).trim() !== ""
+      ? String(idSource).trim()
+      : undefined;
   const text = String(
     row.text ?? row.message ?? row.msg ?? row.body ?? row.content ?? "",
   );
   const rawTime = String(
     row.createdAt ??
       row.messageTime ??
+      row.msgtime ??
+      row.msgTime ??
       row.timestamp ??
       row.time ??
       row.date ??
       "",
   );
-  const createdAt = rawTime ? parseMessageTime(rawTime) : new Date().toISOString();
+
+  const fields: Record<string, unknown> = { ...row };
+  delete fields.msgDetails;
+  if (row.msgDetails && typeof row.msgDetails === "object") {
+    Object.assign(fields, row.msgDetails as Record<string, unknown>);
+  }
+
+  const messageHeader = String(fields.messageHeader ?? "").trim();
+  const embeddedClock = messageHeader
+    ? splitSesMessageHeader(messageHeader).embeddedTime
+    : "";
+  const headerTimeRaw = String(
+    fields.messageTime ?? fields.msgtime ?? fields.msgTime ?? "",
+  ).trim() || embeddedClock;
+  const createdAt = messageHeader
+    ? createdAtFromMessageHeaderAndTime(messageHeader, headerTimeRaw)
+    : rawTime
+      ? parseMessageTime(rawTime)
+      : headerTimeRaw
+        ? parseMessageTime(headerTimeRaw)
+        : new Date().toISOString();
   const senderRole = inferSenderRole(row);
   const senderId =
     typeof row.senderId === "string"
@@ -195,13 +278,38 @@ function mapApiRowToMessage(
         ? agentUserId
         : customerId;
 
+  const messageTimeRaw =
+    headerTimeRaw ||
+    embeddedClock ||
+    (row.msgtime ?? row.msgTime ?? row.messageTimeDisplay);
+  const messageTime =
+    typeof messageTimeRaw === "string" &&
+    messageTimeRaw.trim() &&
+    !/^\d{4}-\d{2}-\d{2}T/.test(messageTimeRaw.trim())
+      ? messageTimeRaw.trim()
+      : undefined;
+
+  const attPrefix =
+    id ??
+    (typeof crypto !== "undefined" && "randomUUID" in crypto
+      ? crypto.randomUUID()
+      : `${chatId}-${index}-${Date.now()}`);
+  const attachments = attachmentsFromSesFields(fields, `${attPrefix}-att`);
+  const displayText = stripSesPlaceholderCaption(
+    text,
+    Boolean(attachments?.length),
+  );
+
   return {
-    id,
+    ...(id ? { id } : {}),
     chatId,
     senderId,
     senderRole,
-    text,
+    text: displayText,
     createdAt,
+    ...(messageTime ? { messageTime } : {}),
+    ...(messageHeader ? { messageHeader } : {}),
+    ...(attachments?.length ? { attachments } : {}),
   };
 }
 
@@ -226,12 +334,24 @@ function parseLoadConversationMessages(
   );
 }
 
+/** Session flag from loadConversation (e.g. 0 = active, 1 = timed out). */
+function extractSessionStatus(json: unknown): number | null {
+  if (!json || typeof json !== "object" || Array.isArray(json)) return null;
+  const raw = (json as Record<string, unknown>).status;
+  if (typeof raw === "number") return raw;
+  if (typeof raw === "string") {
+    const n = Number(raw);
+    return Number.isFinite(n) ? n : null;
+  }
+  return null;
+}
+
 async function fetchConversationByChatIndex(
   chatIndex: string | number,
   chatId: string,
   agentUserId: string,
   customerId: string,
-): Promise<Message[]> {
+): Promise<{ sessionStatus: number | null; messages: Message[] }> {
   const url = new URL(getLoadConversationUrl());
   url.searchParams.set("Userid", agentUserId);
 
@@ -244,7 +364,14 @@ async function fetchConversationByChatIndex(
     throw new Error(`loadConversation failed: ${res.status}`);
   }
   const json: unknown = await res.json();
-  return parseLoadConversationMessages(json, chatId, agentUserId, customerId);
+  const sessionStatus = extractSessionStatus(json);
+  const messages = parseLoadConversationMessages(
+    json,
+    chatId,
+    agentUserId,
+    customerId,
+  );
+  return { sessionStatus, messages };
 }
 
 /** SES `chatIndex` for APIs: prefer row index, else `chat.id` (also derived from chatIndex). */
@@ -255,6 +382,18 @@ function getChatIndexForApi(chat: Chat): string | number | null {
   const raw = chat.id.trim();
   if (!raw) return null;
   return raw;
+}
+
+/** Oldest first, newest last (stable when timestamps tie). */
+function sortMessagesChronologically(messages: Message[]): Message[] {
+  return [...messages].sort((a, b) => {
+    const ta = new Date(a.createdAt).getTime();
+    const tb = new Date(b.createdAt).getTime();
+    const na = Number.isNaN(ta) ? 0 : ta;
+    const nb = Number.isNaN(tb) ? 0 : tb;
+    if (na !== nb) return na - nb;
+    return stableMessageListKey(a).localeCompare(stableMessageListKey(b));
+  });
 }
 
 async function fetchQueueAndAssignedChats(agent: User): Promise<{
@@ -348,8 +487,6 @@ interface State {
   activeChatId: string | null;
   domainIndex: number | null;
   chatFrom: number | null;
-  /** Bumps on My Chats `selectChat` so `loadConversationById` can refetch (e.g. same chat re-click). */
-  conversationReloadNonce: number;
 }
 
 const initialState: State = {
@@ -358,7 +495,6 @@ const initialState: State = {
   activeChatId: null,
   domainIndex: null,
   chatFrom: null,
-  conversationReloadNonce: 0,
 };
 
 function mergeChatsById(prev: Chat[], incoming: Chat[]): Chat[] {
@@ -401,57 +537,6 @@ export function useWebSocketChat(currentUser: User | null) {
     };
   }, [client, currentUser?.id, currentUser?.role]); // eslint-disable-line react-hooks/exhaustive-deps -- refetch on identity/role only
 
-  const conversationLoadKey = useMemo(() => {
-    if (!state.activeChatId) return null;
-    const chat = state.chats.find((c) => c.id === state.activeChatId);
-    if (!chat) return null;
-    const idx = getChatIndexForApi(chat);
-    if (idx === null || String(idx) === "") return null;
-    return `${chat.id}:${String(idx)}`;
-  }, [state.activeChatId, state.chats]);
-
-  useEffect(() => {
-    if (!currentUser || currentUser.role !== "agent") return;
-    if (!conversationLoadKey) return;
-    const chatId = state.activeChatId;
-    if (!chatId) return;
-    const chat = state.chats.find((c) => c.id === chatId);
-    if (!chat) return;
-    const chatIndex = getChatIndexForApi(chat);
-    if (chatIndex === null || String(chatIndex) === "") return;
-
-    let cancelled = false;
-    fetchConversationByChatIndex(
-      chatIndex,
-      chatId,
-      currentUser.id,
-      chat.customer.id,
-    )
-      .then((loaded) => {
-        if (cancelled) return;
-        setState((prev) => ({
-          ...prev,
-          messages: [
-            ...prev.messages.filter((m) => m.chatId !== chatId),
-            ...loaded,
-          ],
-        }));
-      })
-      .catch(() => {
-        // API may fail (CORS, network); keep existing / WS messages.
-      });
-
-    return () => {
-      cancelled = true;
-    };
-    // eslint-disable-next-line react-hooks/exhaustive-deps -- fetch when selection key / reload nonce changes; avoids refetch when unrelated chat fields update
-  }, [
-    conversationLoadKey,
-    state.conversationReloadNonce,
-    currentUser?.id,
-    currentUser?.role,
-  ]);
-
   useEffect(() => {
     const userId = currentUser?.id;
     client.connect();
@@ -466,8 +551,8 @@ export function useWebSocketChat(currentUser: User | null) {
               lastMessage: event.payload.firstMessage,
             };
             const hasChat = prev.chats.some((c) => c.id === chat.id);
-            const hasMsg = prev.messages.some(
-              (m) => m.id === event.payload.firstMessage.id,
+            const hasMsg = prev.messages.some((m) =>
+              messagesAreSameListItem(m, event.payload.firstMessage),
             );
             return {
               ...prev,
@@ -497,7 +582,11 @@ export function useWebSocketChat(currentUser: User | null) {
             };
           }
           case "message": {
-            if (prev.messages.some((m) => m.id === event.payload.message.id)) {
+            if (
+              prev.messages.some((m) =>
+                messagesAreSameListItem(m, event.payload.message),
+              )
+            ) {
               return prev;
             }
             return {
@@ -547,6 +636,19 @@ export function useWebSocketChat(currentUser: User | null) {
               messages: prev.messages.filter((m) => !removedIds.has(m.chatId)),
             };
           }
+          case "new-chat-in-queue": {
+            const incoming = mapNewChatInQueueDataToChat(event.payload.data);
+            if (!incoming) return prev;
+            const existing = prev.chats.find((c) => c.id === incoming.id);
+            const chat: Chat = {
+              ...incoming,
+              lastMessage: incoming.lastMessage ?? existing?.lastMessage,
+            };
+            return {
+              ...prev,
+              chats: mergeChatsById(prev.chats, [chat]),
+            };
+          }
           default:
             return prev;
         }
@@ -578,19 +680,26 @@ export function useWebSocketChat(currentUser: User | null) {
     () => state.chats.find((c) => c.id === state.activeChatId) ?? null,
     [state.chats, state.activeChatId],
   );
-  const activeMessages = useMemo(
-    () =>
-      state.activeChatId
-        ? state.messages.filter((m) => m.chatId === state.activeChatId)
-        : [],
-    [state.messages, state.activeChatId],
-  );
+  const activeMessages = useMemo(() => {
+    if (!state.activeChatId) return [];
+    const forChat = state.messages.filter(
+      (m) => m.chatId === state.activeChatId,
+    );
+    return sortMessagesChronologically(forChat);
+  }, [state.messages, state.activeChatId]);
 
   const startChat = (text: string, attachments?: Attachment[]) => {
     if (!currentUser) return;
+    const messageTime = formatSesLocalMessageTime(new Date());
     client.send({
       type: "customer-start-chat",
-      payload: { customer: currentUser, text, attachments },
+      payload: {
+        customer: currentUser,
+        text,
+        attachments,
+        messageTime,
+        msgtime: messageTime,
+      },
     });
   };
 
@@ -625,15 +734,14 @@ export function useWebSocketChat(currentUser: User | null) {
 
       setState((prev) => ({
         ...prev,
-        activeChatId: chatId,
         chats: prev.chats.map((c) =>
           c.id === chatId ? { ...c, status: "assigned", agent: currentUser } : c,
         ),
       }));
 
       client.sendRaw({
-        chatroomId: chatId,
-        userId: currentUser.id,
+        chatroomId: chatId.toString(),
+        userId: currentUser.id.toString(),
         domainIndex: state.domainIndex,
         chatFrom: state.chatFrom,
         type: "ChatRequestAccepted",
@@ -645,6 +753,7 @@ export function useWebSocketChat(currentUser: User | null) {
 
   const sendMessage = (text: string, attachments?: Attachment[]) => {
     if (!currentUser || !state.activeChatId) return;
+    const messageTime = formatSesLocalMessageTime(new Date());
     client.send({
       type: "send-message",
       payload: {
@@ -652,6 +761,8 @@ export function useWebSocketChat(currentUser: User | null) {
         text,
         sender: currentUser,
         attachments,
+        messageTime,
+        msgtime: messageTime,
       },
     });
   };
@@ -666,11 +777,59 @@ export function useWebSocketChat(currentUser: User | null) {
   };
 
   const selectChat = (chatId: string) => {
-    setState((prev) => ({
-      ...prev,
-      activeChatId: chatId,
-      conversationReloadNonce: prev.conversationReloadNonce + 1,
-    }));
+    void (async () => {
+      if (!currentUser || currentUser.role !== "agent") return;
+      const chat = state.chats.find((c) => c.id === chatId);
+      if (!chat || chat.status === "queued") return;
+      const chatIndex = getChatIndexForApi(chat);
+      if (chatIndex === null || String(chatIndex) === "") {
+        toast.error("Unable to load this chat right now.");
+        return;
+      }
+      if (state.domainIndex === null || state.chatFrom === null) {
+        toast.error("Unable to load this chat right now.");
+        return;
+      }
+
+      try {
+        const { sessionStatus, messages } = await fetchConversationByChatIndex(
+          chatIndex,
+          chatId,
+          currentUser.id,
+          chat.customer.id,
+        );
+
+        if (sessionStatus === 1) {
+          toast.error("Chat has been closed due to a session timeout!");
+          return;
+        }
+
+        const sessionOk = sessionStatus === 0 || sessionStatus === null;
+        if (!sessionOk) {
+          toast.error("Unable to load this chat right now.");
+          return;
+        }
+
+        setState((prev) => ({
+          ...prev,
+          activeChatId: chatId,
+          messages: [
+            ...prev.messages.filter((m) => m.chatId !== chatId),
+            ...messages,
+          ],
+        }));
+
+        client.sendRaw({
+          chatroomId: chatId.toString(),
+          userId: currentUser.id.toString(),
+          domainIndex: state.domainIndex,
+          chatFrom: state.chatFrom,
+          type: "AgentLiveChatStart",
+        });
+      } catch {
+        toast.error("Unable to load this chat right now.");
+      }
+    })();
   };
 
   return {

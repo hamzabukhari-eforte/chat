@@ -1,7 +1,8 @@
 "use client";
 
-import { useState } from "react";
+import { useMemo, useState } from "react";
 import { FiSearch } from "react-icons/fi";
+import { sortChatsByLatestFirst } from "../../lib/chat/chatSort";
 import { AvatarWithInitials } from "../atoms/AvatarWithInitials";
 import type { Chat, User } from "../../lib/chat/types";
 
@@ -77,13 +78,19 @@ export function ChatSidebarSection({
   const [queueSearch, setQueueSearch] = useState("");
   const [myChatsSearch, setMyChatsSearch] = useState("");
 
-  const filteredQueue = queue.filter((chat) =>
-    chatMatchesCustomerSearch(chat, queueSearch),
-  );
+  const sortedQueue = useMemo(() => {
+    const filtered = queue.filter((chat) =>
+      chatMatchesCustomerSearch(chat, queueSearch),
+    );
+    return sortChatsByLatestFirst(filtered);
+  }, [queue, queueSearch]);
 
-  const filteredMyChats = myChats.filter((chat) =>
-    chatMatchesCustomerSearch(chat, myChatsSearch),
-  );
+  const sortedMyChats = useMemo(() => {
+    const filtered = myChats.filter((chat) =>
+      chatMatchesCustomerSearch(chat, myChatsSearch),
+    );
+    return sortChatsByLatestFirst(filtered);
+  }, [myChats, myChatsSearch]);
 
   return (
     <aside className="w-full md:w-[640px] lg:w-[720px] bg-white border-r border-gray-200 flex h-full">
@@ -109,7 +116,7 @@ export function ChatSidebarSection({
         </div>
 
         <div className="flex-1 overflow-y-auto p-2">
-          {filteredQueue.map((chat) => {
+          {sortedQueue.map((chat) => {
             const timeLabel =
               chat.messageTimeDisplay ??
               (chat.lastMessage
@@ -148,7 +155,7 @@ export function ChatSidebarSection({
             );
           })}
 
-          {filteredQueue.length === 0 && (
+          {sortedQueue.length === 0 && (
             <div className="mt-8 text-center text-xs text-gray-400 px-2">
               {queueSearch
                 ? "No matching chats found."
@@ -180,7 +187,7 @@ export function ChatSidebarSection({
         </div>
 
         <div className="flex-1 overflow-y-auto p-2">
-          {filteredMyChats.map((chat) => {
+          {sortedMyChats.map((chat) => {
             const isActive = chat.id === activeChatId;
             const timeLabel =
               chat.messageTimeDisplay ??
@@ -227,7 +234,7 @@ export function ChatSidebarSection({
             );
           })}
 
-          {filteredMyChats.length === 0 && (
+          {sortedMyChats.length === 0 && (
             <div className="mt-8 text-center text-xs text-gray-400 px-2">
               {myChatsSearch
                 ? "No matching chats found."
