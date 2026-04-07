@@ -1,0 +1,63 @@
+---
+description: Next.js 16 app architecture, component patterns, and UI conventions
+alwaysApply: true
+---
+
+## Next.js 16 Architecture & Patterns
+
+- **Routing**
+  - Use the `app/` router exclusively (no legacy `pages/`).
+  - Treat `app/(web)` (or equivalent) as the **web route** for all frontend pages.
+  - Keep API logic in `app/api/**` route handlers; avoid business logic in React components.
+
+- **WebSocket & Backend**
+  - Implement WebSocket server on **port 3030** in a dedicated server module (e.g. `lib/websocket/server.ts`).
+  - API route handlers should delegate to shared WebSocket/service modules, not implement protocol logic inline.
+  - Keep transport-agnostic business logic in `lib/services/**`.
+
+- **Component Hierarchy**
+  - Prioritize **small, reusable components**; follow:
+    - **`ui/`**: shadcn/ui-based primitives (buttons, inputs, dialogs, etc.).
+    - **`atoms/`**: tiny, application-specific building blocks (e.g. `StatusBadge`, `UserAvatar`).
+    - **`sections/`**: page sections / composite components (e.g. `ChatSidebar`, `MessagesPanel`).
+    - **`(web)` route components**: small page-level composition using `ui`, `atoms`, and `sections`.
+  - Avoid putting fetch/mutation logic directly in small UI primitives; use hooks or container components.
+
+- **shadcn/ui**
+  - Generate shadcn components into `app/(web)/components/ui` (or a single `components/ui/` root) using the official CLI.
+  - Never modify vendor-style shadcn primitives inline for one-off needs; extend via:
+    - Wrapper components in `atoms/` or `sections/`, or
+    - Tailwind utility classes / `className` overrides.
+  - Preserve shadcn accessibility props and ARIA patterns.
+
+- **react-icons**
+  - Centralize icon usage in a small set of reusable helpers (e.g. `atoms/Icon.tsx`) instead of importing icons ad hoc in many files.
+  - Prefer consistent icon packs and sizing; do not hardcode random sizes in multiple components.
+
+- **Code Organization & Reuse**
+  - Extract **shared logic** into:
+    - `hooks/` for React stateful logic (e.g. `useChat`, `useWebSocket3030`).
+    - `lib/` for pure utilities, data mappers, validators, and server-only helpers.
+  - Avoid duplicate layouts/sections: if a pattern is used twice, promote it to `sections/`.
+  - Keep components **presentational by default**; use props to inject behavior and data instead of internal fetches where possible.
+
+- **Server vs Client Components**
+  - Default to **Server Components**; mark as `"use client"` only when needed (event handlers, stateful UI, browser APIs, websockets in client).
+  - Do not mix heavy server-only dependencies in client components.
+
+- **Styling & UX**
+  - Use **Tailwind CSS** as the primary styling system; do **not** create feature- or component-specific `.css` files.
+  - Only use `globals.css` (or equivalent) for:
+    - Tailwind base imports, and
+    - Project-wide theme tokens and utilities (e.g. `text-primary`, `text-secondary`, `bg-elevated`, etc.).
+  - Prefer Tailwind utilities and shadcn variants over custom CSS declarations.
+  - Avoid inline style objects unless absolutely necessary.
+  - For all interactive elements (buttons, clickable divs/icons), ensure a visible hover state and use Tailwind's `cursor-pointer` (or a semantic `button` element that already shows a pointer) so actions always feel obviously clickable.
+  - Maintain consistent spacing, typography, and color usage through shadcn tokens and Tailwind utilities.
+  - Favor accessible components: ensure labels, focus states, keyboard nav, and error messages are present.
+
+- **Quality & Maintenance**
+  - Keep files small and focused: if a component exceeds ~150–200 lines or has multiple responsibilities, split it.
+  - Enforce TypeScript types for props, API responses, and WebSocket messages (e.g. shared `types/`).
+  - Do not leave dead components, commented-out blocks, or unused exports; refactor or remove them.
+
