@@ -40,6 +40,23 @@ function tryNormalizeNewChatInQueue(raw: unknown): IncomingEvent | null {
   };
 }
 
+/** SES read/delivery receipt: `{ event: "CHAT_SEEN", msgId, status }`. */
+function tryNormalizeChatSeen(raw: unknown): IncomingEvent | null {
+  if (!raw || typeof raw !== "object") return null;
+  const o = raw as Record<string, unknown>;
+  if (String(o.event).toUpperCase() !== "CHAT_SEEN") return null;
+  const msgId = o.msgId ?? o.messageId ?? o.msgIndex;
+  if (msgId === undefined || msgId === null) return null;
+  const statusRaw = o.status;
+  const status =
+    typeof statusRaw === "number" ? statusRaw : Number(statusRaw);
+  if (Number.isNaN(status)) return null;
+  return {
+    type: "chat-seen",
+    payload: { msgId: String(msgId), status },
+  };
+}
+
 /**
  * Parses WS `msgtime` / `messageTime` into ISO for `createdAt` (today’s date when only a clock is sent).
  * Supports `09:36:06 AM`, `9:36 AM`, and 24h `14:30` / `14:30:45`.
@@ -78,18 +95,29 @@ function parseWsMsgTime(raw: string): string {
 function pickBackendMessageId(
   md: Record<string, unknown>,
   root: Record<string, unknown>,
+  cd?: Record<string, unknown>,
 ): string | null {
-  const candidates = [
+  const asObj = (v: unknown): Record<string, unknown> | null =>
+    v && typeof v === "object" ? (v as Record<string, unknown>) : null;
+  const data = asObj(root.data);
+  /** Order: root/msgDetails fields that match `CHAT_SEEN.msgId` first. */
+  const candidates: unknown[] = [
+    root.msgId,
+    md.msgId,
     md.msgIndex,
     md.messageId,
-    md.msgId,
     md.id,
     md.messageUID,
     md.uniqueId,
     root.msgIndex,
     root.messageId,
-    root.msgId,
     root.id,
+    ...(cd
+      ? [cd.msgId, cd.msgIndex, cd.messageId]
+      : []),
+    ...(data
+      ? [data.msgId, data.msgIndex, data.messageId]
+      : []),
   ];
   for (const c of candidates) {
     if (c === undefined || c === null) continue;
@@ -127,11 +155,33 @@ function tryNormalizeNewMessage(raw: unknown): IncomingEvent | null {
 
   const chatDetail = o.chatDetail;
   const msgDetails = o.msgDetails;
-  if (!chatDetail || typeof chatDetail !== "object") return null;
-  if (!msgDetails || typeof msgDetails !== "object") return null;
+  const dataPayload = o.data;
 
-  const cd = chatDetail as Record<string, unknown>;
-  const md = msgDetails as Record<string, unknown>;
+  let cd: Record<string, unknown>;
+  let md: Record<string, unknown>;
+
+  if (
+    chatDetail &&
+    typeof chatDetail === "object" &&
+    msgDetails &&
+    typeof msgDetails === "object"
+  ) {
+    cd = chatDetail as Record<string, unknown>;
+    md = msgDetails as Record<string, unknown>;
+  } else if (dataPayload && typeof dataPayload === "object") {
+    const d = dataPayload as Record<string, unknown>;
+    md = d;
+    /** Flat `data` envelope: chat + message fields together (see SES `NEW_MESSAGE`). */
+    cd = {
+      chatroomId: d.chatId ?? d.chatroomId,
+      chatAssignTo: String(
+        d.AgentName ?? d.agentName ?? d.chatAssignTo ?? "",
+      ).trim(),
+      customerNumber: d.customerNumber ?? d.uniqueKey ?? d.customerPhone,
+    };
+  } else {
+    return null;
+  }
 
   const chatroomId = cd.chatroomId;
   const chatId =
@@ -165,8 +215,10 @@ function tryNormalizeNewMessage(raw: unknown): IncomingEvent | null {
       ? isFromAgent
         ? "agent"
         : "customer"
-      : // Fallback to numeric field used by older payloads.
-        (md.messagefrom === 1 ? "agent" : "customer");
+      : // `messagefrom` 1 = agent (SES); tolerate string "1".
+        Number(md.messagefrom) === 1
+        ? "agent"
+        : "customer";
 
   const assignTo = String(cd.chatAssignTo ?? "");
   const customerKey = String(
@@ -178,16 +230,15 @@ function tryNormalizeNewMessage(raw: unknown): IncomingEvent | null {
       ? (assignTo || "agent")
       : customerKey;
 
-  const backendMessageId = pickBackendMessageId(md, o);
-  const attIdBase =
-    backendMessageId ??
-    (typeof crypto !== "undefined" && "randomUUID" in crypto
-      ? crypto.randomUUID()
-      : `${chatId}-${Date.now()}-${Math.random().toString(36).slice(2, 9)}`);
+  const backendMessageId = pickBackendMessageId(md, o, cd);
+  /** Attachment row keys: prefer SES message id; otherwise chatroom id only (no client UUIDs). */
+  const attachmentIdPrefix = backendMessageId
+    ? `${backendMessageId}-att`
+    : `${chatId}-media`;
 
   const attachments = attachmentsFromSesFields(
     md as Record<string, unknown>,
-    `${attIdBase}-att`,
+    attachmentIdPrefix,
   );
   const displayText = stripSesPlaceholderCaption(
     text,
@@ -265,7 +316,8 @@ export class ChatWebSocketClient {
         const normalized =
           tryNormalizeBackendEvent(raw) ??
           tryNormalizeNewMessage(raw) ??
-          tryNormalizeNewChatInQueue(raw);
+          tryNormalizeNewChatInQueue(raw) ??
+          tryNormalizeChatSeen(raw);
         const parsed = enrichIncomingMessageTimes(
           (normalized ?? raw) as IncomingEvent,
         );

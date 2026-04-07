@@ -58,6 +58,8 @@ export interface Message {
   messageHeader?: string;
   system?: boolean;
   attachments?: Attachment[];
+  /** SES `CHAT_SEEN`: `3` = delivered (gray ✓✓), `4` = seen (blue ✓✓). */
+  chatSeenStatus?: 3 | 4;
 }
 
 export type OutgoingEvent =
@@ -124,5 +126,9 @@ export type IncomingEvent =
       /** SES WebSocket `NEW_CHAT_IN_QUEUE` — same row shape as queue API after `getQueueNAssignedChats`. */
       type: "new-chat-in-queue";
       payload: { data: Record<string, unknown> };
+    }
+  | {
+      type: "chat-seen";
+      payload: { msgId: string; status: number };
     };
 

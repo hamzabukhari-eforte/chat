@@ -18,6 +18,7 @@ import {
   FaFileAlt,
 } from "react-icons/fa";
 import { AvatarWithInitials } from "../atoms/AvatarWithInitials";
+import { MessageSeenTicks } from "../atoms/MessageSeenTicks";
 import { ChatAudioRecorder } from "../atoms/ChatAudioRecorder";
 import { ChatVideoPlayer } from "../atoms/ChatVideoPlayer";
 import { isVideoFile } from "../../lib/chat/fileAttachment";
@@ -441,8 +442,9 @@ export function ChatWindowSection({
                         <p className="text-sm">{message.text}</p>
                       </div>
                     )}
-                    <div className="flex items-center gap-1 mt-1">
+                    <div className="flex items-center justify-end gap-1 mt-1">
                       <span className="text-xs text-gray-400">{timeStr}</span>
+                      <MessageSeenTicks status={message.chatSeenStatus} />
                     </div>
                   </div>
                   <AvatarWithInitials

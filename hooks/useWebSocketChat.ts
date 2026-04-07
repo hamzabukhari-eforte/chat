@@ -208,17 +208,33 @@ function mapNewChatInQueueDataToChat(data: Record<string, unknown>): Chat | null
 
 type LoadConversationApiRow = Record<string, unknown>;
 
+/**
+ * API `loadConversationById` rows only (WebSocket `NEW_MESSAGE` uses `lib/websocket/client.ts`).
+ * `isFromAgent === true` → agent (right); else customer (left).
+ */
 function inferSenderRole(row: LoadConversationApiRow): "agent" | "customer" {
-  const sr = row.senderRole ?? row.sender_type ?? row.role;
+  const merged: Record<string, unknown> = { ...row };
+  if (row.msgDetails && typeof row.msgDetails === "object") {
+    Object.assign(merged, row.msgDetails as Record<string, unknown>);
+  }
+
+  const isFromAgent = merged.isFromAgent;
+  if (typeof isFromAgent === "boolean") {
+    return isFromAgent ? "agent" : "customer";
+  }
+
+  const sr = merged.senderRole ?? merged.sender_type ?? merged.role;
   if (typeof sr === "string") {
     const s = sr.toLowerCase();
     if (s === "agent" || s === "user" || s === "me") return "agent";
     if (s === "customer" || s === "client") return "customer";
   }
-  if (typeof row.fromAgent === "boolean") return row.fromAgent ? "agent" : "customer";
-  if (typeof row.fromCustomer === "boolean")
-    return row.fromCustomer ? "customer" : "agent";
-  if (typeof row.isAgent === "boolean") return row.isAgent ? "agent" : "customer";
+  if (typeof merged.fromAgent === "boolean")
+    return merged.fromAgent ? "agent" : "customer";
+  if (typeof merged.fromCustomer === "boolean")
+    return merged.fromCustomer ? "customer" : "agent";
+  if (typeof merged.isAgent === "boolean")
+    return merged.isAgent ? "agent" : "customer";
   return "customer";
 }
 
@@ -289,12 +305,10 @@ function mapApiRowToMessage(
       ? messageTimeRaw.trim()
       : undefined;
 
-  const attPrefix =
-    id ??
-    (typeof crypto !== "undefined" && "randomUUID" in crypto
-      ? crypto.randomUUID()
-      : `${chatId}-${index}-${Date.now()}`);
-  const attachments = attachmentsFromSesFields(fields, `${attPrefix}-att`);
+  const attachmentIdPrefix = id
+    ? `${id}-att`
+    : `${chatId}-row-${index}-media`;
+  const attachments = attachmentsFromSesFields(fields, attachmentIdPrefix);
   const displayText = stripSesPlaceholderCaption(
     text,
     Boolean(attachments?.length),
@@ -487,6 +501,8 @@ interface State {
   activeChatId: string | null;
   domainIndex: number | null;
   chatFrom: number | null;
+  /** `CHAT_SEEN` can arrive before `NEW_MESSAGE`; apply when a message with that `id` appears. */
+  pendingSeenByMsgId: Record<string, 3 | 4>;
 }
 
 const initialState: State = {
@@ -495,7 +511,20 @@ const initialState: State = {
   activeChatId: null,
   domainIndex: null,
   chatFrom: null,
+  pendingSeenByMsgId: {},
 };
+
+function applyPendingSeenToMessage(
+  m: Message,
+  pending: Record<string, 3 | 4>,
+): { message: Message; pending: Record<string, 3 | 4> } {
+  if (m.id == null) return { message: m, pending };
+  const key = String(m.id);
+  const st = pending[key];
+  if (st !== 3 && st !== 4) return { message: m, pending };
+  const { [key]: _, ...rest } = pending;
+  return { message: { ...m, chatSeenStatus: st }, pending: rest };
+}
 
 function mergeChatsById(prev: Chat[], incoming: Chat[]): Chat[] {
   const map = new Map<string, Chat>();
@@ -554,14 +583,28 @@ export function useWebSocketChat(currentUser: User | null) {
             const hasMsg = prev.messages.some((m) =>
               messagesAreSameListItem(m, event.payload.firstMessage),
             );
+            if (hasMsg) {
+              return {
+                ...prev,
+                chats: hasChat
+                  ? prev.chats.map((c) => (c.id === chat.id ? chat : c))
+                  : [...prev.chats, chat],
+                activeChatId: isOwnChat
+                  ? event.payload.chat.id
+                  : prev.activeChatId,
+              };
+            }
+            const firstApplied = applyPendingSeenToMessage(
+              event.payload.firstMessage,
+              prev.pendingSeenByMsgId,
+            );
             return {
               ...prev,
               chats: hasChat
                 ? prev.chats.map((c) => (c.id === chat.id ? chat : c))
                 : [...prev.chats, chat],
-              messages: hasMsg
-                ? prev.messages
-                : [...prev.messages, event.payload.firstMessage],
+              messages: [...prev.messages, firstApplied.message],
+              pendingSeenByMsgId: firstApplied.pending,
               activeChatId: isOwnChat
                 ? event.payload.chat.id
                 : prev.activeChatId,
@@ -589,12 +632,17 @@ export function useWebSocketChat(currentUser: User | null) {
             ) {
               return prev;
             }
+            const applied = applyPendingSeenToMessage(
+              event.payload.message,
+              prev.pendingSeenByMsgId,
+            );
             return {
               ...prev,
-              messages: [...prev.messages, event.payload.message],
+              messages: [...prev.messages, applied.message],
+              pendingSeenByMsgId: applied.pending,
               chats: prev.chats.map((c) =>
-                c.id === event.payload.message.chatId
-                  ? { ...c, lastMessage: event.payload.message }
+                c.id === applied.message.chatId
+                  ? { ...c, lastMessage: applied.message }
                   : c,
               ),
             };
@@ -647,6 +695,30 @@ export function useWebSocketChat(currentUser: User | null) {
             return {
               ...prev,
               chats: mergeChatsById(prev.chats, [chat]),
+            };
+          }
+          case "chat-seen": {
+            const { msgId, status } = event.payload;
+            const n = Number(status);
+            if (n !== 3 && n !== 4) return prev;
+            const st = (n === 4 ? 4 : 3) as 3 | 4;
+            const key = String(msgId);
+            const matched = prev.messages.some(
+              (m) => m.id != null && String(m.id) === key,
+            );
+            const messages = prev.messages.map((m) =>
+              m.id != null && String(m.id) === key
+                ? { ...m, chatSeenStatus: st }
+                : m,
+            );
+            if (matched) {
+              const { [key]: _, ...rest } = prev.pendingSeenByMsgId;
+              return { ...prev, messages, pendingSeenByMsgId: rest };
+            }
+            return {
+              ...prev,
+              messages,
+              pendingSeenByMsgId: { ...prev.pendingSeenByMsgId, [key]: st },
             };
           }
           default:
@@ -753,6 +825,29 @@ export function useWebSocketChat(currentUser: User | null) {
 
   const sendMessage = (text: string, attachments?: Attachment[]) => {
     if (!currentUser || !state.activeChatId) return;
+
+    if (currentUser.role === "agent") {
+      const hasAttachment = Boolean(attachments?.length);
+      const lines = [
+        text.trim(),
+        ...(hasAttachment
+          ? (attachments ?? []).map((a) => a.url).filter(Boolean)
+          : []),
+      ].filter(Boolean);
+      const messageBody = lines.join("\n");
+      if (!messageBody) return;
+
+      client.sendRaw({
+        chatroomId: state.activeChatId.toString(),
+        userId: currentUser.id.toString(),
+        message: messageBody,
+        type: "Message",
+        messagefrom: "1",
+        messageType: hasAttachment ? "2" : "1",
+      });
+      return;
+    }
+
     const messageTime = formatSesLocalMessageTime(new Date());
     client.send({
       type: "send-message",
@@ -810,21 +905,30 @@ export function useWebSocketChat(currentUser: User | null) {
           return;
         }
 
-        setState((prev) => ({
-          ...prev,
-          activeChatId: chatId,
-          messages: [
-            ...prev.messages.filter((m) => m.chatId !== chatId),
-            ...messages,
-          ],
-        }));
+        setState((prev) => {
+          let pending = prev.pendingSeenByMsgId;
+          const merged = messages.map((m) => {
+            const a = applyPendingSeenToMessage(m, pending);
+            pending = a.pending;
+            return a.message;
+          });
+          return {
+            ...prev,
+            activeChatId: chatId,
+            messages: [
+              ...prev.messages.filter((m) => m.chatId !== chatId),
+              ...merged,
+            ],
+            pendingSeenByMsgId: pending,
+          };
+        });
 
         client.sendRaw({
           chatroomId: chatId.toString(),
           userId: currentUser.id.toString(),
           domainIndex: state.domainIndex,
           chatFrom: state.chatFrom,
-          type: "AgentLiveChatStart",
+          type: "AgentLiveChatStart", //send again when socket reconnects
         });
       } catch {
         toast.error("Unable to load this chat right now.");
