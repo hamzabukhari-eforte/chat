@@ -560,6 +560,7 @@ async function sendFileChunksViaWebSocket(
       Agentid: ctx.agentId,
       messagefrom: ctx.messageFrom,
       message: ctx.message,
+      messageType: 2,
     };
     client.sendRaw(endOfFilePayload);
     console.log("[ws] EndOfFile sent (file transfer complete)", {
