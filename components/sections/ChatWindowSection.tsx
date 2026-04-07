@@ -37,7 +37,11 @@ import type { Attachment, Chat, Message } from "../../lib/chat/types";
 interface Props {
   activeChat: Chat | null;
   messages: Message[];
-  onSendMessage: (text: string, attachments?: Attachment[]) => void;
+  onSendMessage: (
+    text: string,
+    attachments?: Attachment[],
+    files?: File[],
+  ) => void;
   onResolveChat: () => void;
   onToggleCustomerInfo: () => void;
   showCustomerInfo: boolean;
@@ -253,7 +257,12 @@ export function ChatWindowSection({
       mimeType: fp.file.type,
     }));
 
-    onSendMessage(text, attachments.length > 0 ? attachments : undefined);
+    const files = filePreviews.map((fp) => fp.file);
+    onSendMessage(
+      text,
+      attachments.length > 0 ? attachments : undefined,
+      files.length > 0 ? files : undefined,
+    );
     setDraft("");
     setFilePreviews([]);
     setShowEmojiPicker(false);

@@ -11,6 +11,7 @@ import {
 import type { IncomingEvent, Message, OutgoingEvent } from "../chat/types";
 
 type Listener = (event: IncomingEvent) => void;
+type OpenListener = (info: { isReconnect: boolean }) => void;
 type InitializerPayload = object;
 
 function tryNormalizeBackendEvent(raw: unknown): IncomingEvent | null {
@@ -283,6 +284,9 @@ function getDefaultWebSocketUrl(): string {
 export class ChatWebSocketClient {
   private socket: WebSocket | null = null;
   private listeners = new Set<Listener>();
+  private openListeners = new Set<OpenListener>();
+  private closedSinceLastOpen = false;
+  private hasCompletedOpen = false;
   private url: string;
   private initializer: InitializerPayload | null = null;
 
@@ -305,10 +309,14 @@ export class ChatWebSocketClient {
 
     this.socket = new WebSocket(this.url);
     this.socket.onopen = () => {
+      const isReconnect = this.hasCompletedOpen && this.closedSinceLastOpen;
+      this.closedSinceLastOpen = false;
+      this.hasCompletedOpen = true;
       console.log("[ws] connected to", this.url);
       if (this.initializer) {
         this.socket?.send(JSON.stringify(this.initializer));
       }
+      this.openListeners.forEach((listener) => listener({ isReconnect }));
     };
     this.socket.onmessage = (event) => {
       try {
@@ -331,6 +339,7 @@ export class ChatWebSocketClient {
       console.error("[ws] error", error);
     };
     this.socket.onclose = () => {
+      this.closedSinceLastOpen = true;
       // very naive reconnect
       console.warn("[ws] disconnected, retrying in 2s");
       setTimeout(() => this.connect(), 2000);
@@ -351,6 +360,14 @@ export class ChatWebSocketClient {
     this.listeners.add(listener);
     return () => {
       this.listeners.delete(listener);
+    };
+  }
+
+  /** Runs after each successful open (initializer already sent). `isReconnect` is true only after a prior successful open and disconnect. */
+  subscribeOpen(listener: OpenListener) {
+    this.openListeners.add(listener);
+    return () => {
+      this.openListeners.delete(listener);
     };
   }
 }

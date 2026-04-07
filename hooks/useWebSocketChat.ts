@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { messagesAreSameListItem, stableMessageListKey } from "../lib/chat/messageKey";
 import {
   createdAtFromMessageHeaderAndTime,
@@ -12,8 +12,13 @@ import {
   attachmentsFromSesFields,
   stripSesPlaceholderCaption,
 } from "../lib/chat/sesMedia";
+import {
+  chunkCountForFileSize,
+  FILE_CHUNK_SIZE_BYTES,
+  readFileChunkAsBase64,
+} from "../lib/chat/fileChunks";
+import type { Attachment, Chat, Message, Role, User } from "../lib/chat/types";
 import { ChatWebSocketClient } from "../lib/websocket/client";
-import type { Attachment, Chat, Message, User } from "../lib/chat/types";
 import { toast } from "sonner";
 
 const DEFAULT_QUEUE_CHATS_URL =
@@ -533,6 +538,89 @@ function mergeChatsById(prev: Chat[], incoming: Chat[]): Chat[] {
   return Array.from(map.values());
 }
 
+const OPTIMISTIC_MSG_ID_PREFIX = "optimistic-local:";
+
+function createOptimisticOutboundMessage(params: {
+  chatId: string;
+  senderId: string;
+  senderRole: Role;
+  text: string;
+  attachments?: Attachment[];
+  messageTime: string;
+}): Message {
+  const suffix =
+    typeof crypto !== "undefined" && "randomUUID" in crypto
+      ? crypto.randomUUID()
+      : `${Date.now()}-${Math.random().toString(36).slice(2, 9)}`;
+  return {
+    id: `${OPTIMISTIC_MSG_ID_PREFIX}${suffix}`,
+    chatId: params.chatId,
+    senderId: params.senderId,
+    senderRole: params.senderRole,
+    text: params.text,
+    createdAt: new Date().toISOString(),
+    messageTime: params.messageTime,
+    ...(params.attachments?.length ? { attachments: params.attachments } : {}),
+  };
+}
+
+async function sendFileChunksViaWebSocket(
+  client: ChatWebSocketClient,
+  files: File[],
+  ctx: {
+    userId: string;
+    chatroomId: string;
+    domainIndex: number | null;
+    chatFrom: number | null;
+    message: string;
+    agentId: string;
+    messageFrom: "0" | "1";
+  },
+): Promise<void> {
+  for (const file of files) {
+    const totalChunks = chunkCountForFileSize(file.size);
+    for (let chunkIndex = 0; chunkIndex < totalChunks; chunkIndex++) {
+      const chunkData = await readFileChunkAsBase64(
+        file,
+        chunkIndex,
+        FILE_CHUNK_SIZE_BYTES,
+      );
+      const payload: Record<string, unknown> = {
+        type: "File",
+        userId: ctx.userId,
+        chatroomId: ctx.chatroomId,
+        fileName: file.name,
+        fileSize: file.size,
+        fileType: file.type,
+        chunkIndex,
+        totalChunks,
+        chunkData,
+      };
+      if (ctx.domainIndex !== null) {
+        payload.domainIndex = ctx.domainIndex;
+      }
+      if (ctx.chatFrom !== null) {
+        payload.chatFrom = ctx.chatFrom;
+      }
+      client.sendRaw(payload);
+    }
+
+    const endOfFilePayload = {
+      chatroomId: ctx.chatroomId,
+      userId: ctx.userId,
+      type: "EndOfFile" as const,
+      Agentid: ctx.agentId,
+      messagefrom: ctx.messageFrom,
+      message: ctx.message,
+      messageType: 2,
+    };
+    client.sendRaw(endOfFilePayload);
+    console.log("[ws] EndOfFile sent (file transfer complete)", {
+      fileName: file.name,
+      chatroomId: ctx.chatroomId,
+    });
+  }
+}
 
 export function useWebSocketChat(currentUser: User | null) {
   const [state, setState] = useState<State>(initialState);
@@ -625,20 +713,69 @@ export function useWebSocketChat(currentUser: User | null) {
             };
           }
           case "message": {
+            const incoming = event.payload.message;
+            /**
+             * Match optimistic rows to server echo even when the server omits
+             * `attachments` (common after chunked upload): normalize captions with
+             * `hasAttachments: true` so "." / placeholders align.
+             */
+            const captionKey = (msg: Message) =>
+              stripSesPlaceholderCaption(msg.text, true).trim();
+
+            const incomingCaption = captionKey(incoming);
+
+            const optimisticMatches = prev.messages.filter((m) => {
+              if (!String(m.id ?? "").startsWith(OPTIMISTIC_MSG_ID_PREFIX))
+                return false;
+              if (m.chatId !== incoming.chatId) return false;
+              if (m.senderId !== incoming.senderId) return false;
+              if (m.senderRole !== incoming.senderRole) return false;
+              return captionKey(m) === incomingCaption;
+            });
+
+            const withoutMatchingOptimistic = prev.messages.filter((m) => {
+              if (!String(m.id ?? "").startsWith(OPTIMISTIC_MSG_ID_PREFIX))
+                return true;
+              if (m.chatId !== incoming.chatId) return true;
+              if (m.senderId !== incoming.senderId) return true;
+              if (m.senderRole !== incoming.senderRole) return true;
+              return captionKey(m) !== incomingCaption;
+            });
+
+            const donorOptimistic = optimisticMatches.find(
+              (o) => (o.attachments?.length ?? 0) > 0,
+            );
+            const serverMissingAttachments =
+              !incoming.attachments?.length ||
+              incoming.attachments.length === 0;
+            const mergedIncoming: Message =
+              donorOptimistic?.attachments?.length && serverMissingAttachments
+                ? {
+                    ...incoming,
+                    attachments: donorOptimistic.attachments,
+                    text:
+                      stripSesPlaceholderCaption(incoming.text, true).trim() ||
+                      "",
+                  }
+                : incoming;
+
             if (
-              prev.messages.some((m) =>
-                messagesAreSameListItem(m, event.payload.message),
+              withoutMatchingOptimistic.some((m) =>
+                messagesAreSameListItem(m, mergedIncoming),
               )
             ) {
-              return prev;
+              if (withoutMatchingOptimistic.length === prev.messages.length) {
+                return prev;
+              }
+              return { ...prev, messages: withoutMatchingOptimistic };
             }
             const applied = applyPendingSeenToMessage(
-              event.payload.message,
+              mergedIncoming,
               prev.pendingSeenByMsgId,
             );
             return {
               ...prev,
-              messages: [...prev.messages, applied.message],
+              messages: [...withoutMatchingOptimistic, applied.message],
               pendingSeenByMsgId: applied.pending,
               chats: prev.chats.map((c) =>
                 c.id === applied.message.chatId
@@ -731,6 +868,52 @@ export function useWebSocketChat(currentUser: User | null) {
     };
   }, [client, currentUser?.id]);
 
+  const agentLiveChatContextRef = useRef<{
+    activeChatId: string | null;
+    domainIndex: number | null;
+    chatFrom: number | null;
+    userId: string | undefined;
+  }>({
+    activeChatId: null,
+    domainIndex: null,
+    chatFrom: null,
+    userId: undefined,
+  });
+
+  useEffect(() => {
+    agentLiveChatContextRef.current = {
+      activeChatId: state.activeChatId,
+      domainIndex: state.domainIndex,
+      chatFrom: state.chatFrom,
+      userId: currentUser?.id,
+    };
+  }, [
+    state.activeChatId,
+    state.domainIndex,
+    state.chatFrom,
+    currentUser?.id,
+  ]);
+
+  useEffect(() => {
+    if (currentUser?.role !== "agent") return;
+    return client.subscribeOpen(({ isReconnect }) => {
+      if (!isReconnect) return;
+      const ctx = agentLiveChatContextRef.current;
+      if (!ctx.activeChatId || !ctx.userId) return;
+      if (ctx.domainIndex === null || ctx.chatFrom === null) return;
+      client.sendRaw({
+        chatroomId: ctx.activeChatId.toString(),
+        userId: ctx.userId.toString(),
+        domainIndex: ctx.domainIndex,
+        chatFrom: ctx.chatFrom,
+        type: "AgentLiveChatStart",
+      });
+      console.log("[ws] AgentLiveChatStart re-sent after reconnect", {
+        chatroomId: ctx.activeChatId,
+      });
+    });
+  }, [client, currentUser?.role]);
+
   useEffect(() => {
     if (!currentUser) return;
     if (currentUser.role === "agent") return;
@@ -760,9 +943,35 @@ export function useWebSocketChat(currentUser: User | null) {
     return sortMessagesChronologically(forChat);
   }, [state.messages, state.activeChatId]);
 
-  const startChat = (text: string, attachments?: Attachment[]) => {
+  const startChat = async (
+    text: string,
+    attachments?: Attachment[],
+    files?: File[],
+  ) => {
     if (!currentUser) return;
     const messageTime = formatSesLocalMessageTime(new Date());
+    if (
+      state.activeChatId &&
+      (Boolean(text.trim()) || attachments?.length || files?.length)
+    ) {
+      const optimistic = createOptimisticOutboundMessage({
+        chatId: state.activeChatId,
+        senderId: currentUser.id,
+        senderRole: currentUser.role,
+        text: text.trim(),
+        attachments,
+        messageTime,
+      });
+      setState((prev) => ({
+        ...prev,
+        messages: [...prev.messages, optimistic],
+        chats: prev.chats.map((c) =>
+          c.id === state.activeChatId
+            ? { ...c, lastMessage: optimistic }
+            : c,
+        ),
+      }));
+    }
     client.send({
       type: "customer-start-chat",
       payload: {
@@ -773,6 +982,26 @@ export function useWebSocketChat(currentUser: User | null) {
         msgtime: messageTime,
       },
     });
+    if (files?.length) {
+      const activeChat = state.activeChatId
+        ? state.chats.find((c) => c.id === state.activeChatId)
+        : undefined;
+      const agentIdForEndOfFile =
+        currentUser.role === "agent"
+          ? currentUser.id.toString()
+          : activeChat?.agent?.id?.toString() ?? "";
+      const messageFrom: "0" | "1" =
+        currentUser.role === "agent" ? "1" : "0";
+      await sendFileChunksViaWebSocket(client, files, {
+        userId: currentUser.id.toString(),
+        chatroomId: "0",
+        domainIndex: state.domainIndex,
+        chatFrom: state.chatFrom,
+        message: text,
+        agentId: agentIdForEndOfFile,
+        messageFrom,
+      });
+    }
   };
 
   const claimChat = async (chatId: string) => {
@@ -823,32 +1052,121 @@ export function useWebSocketChat(currentUser: User | null) {
     }
   };
 
-  const sendMessage = (text: string, attachments?: Attachment[]) => {
+  const sendMessage = async (
+    text: string,
+    attachments?: Attachment[],
+    files?: File[],
+  ) => {
     if (!currentUser || !state.activeChatId) return;
 
     if (currentUser.role === "agent") {
-      const hasAttachment = Boolean(attachments?.length);
-      const lines = [
-        text.trim(),
-        ...(hasAttachment
-          ? (attachments ?? []).map((a) => a.url).filter(Boolean)
-          : []),
-      ].filter(Boolean);
-      const messageBody = lines.join("\n");
-      if (!messageBody) return;
+      const hasFiles = Boolean(files?.length);
+
+      if (!hasFiles) {
+        const hasAttachment = Boolean(attachments?.length);
+        const lines = [
+          text.trim(),
+          ...(hasAttachment
+            ? (attachments ?? []).map((a) => a.url).filter(Boolean)
+            : []),
+        ].filter(Boolean);
+        const messageBody = lines.join("\n");
+        if (!messageBody) return;
+
+        const messageTime = formatSesLocalMessageTime(new Date());
+        const optimistic = createOptimisticOutboundMessage({
+          chatId: state.activeChatId,
+          senderId: currentUser.id,
+          senderRole: "agent",
+          text: text.trim(),
+          attachments: hasAttachment ? attachments : undefined,
+          messageTime,
+        });
+        setState((prev) => ({
+          ...prev,
+          messages: [...prev.messages, optimistic],
+          chats: prev.chats.map((c) =>
+            c.id === state.activeChatId
+              ? { ...c, lastMessage: optimistic }
+              : c,
+          ),
+        }));
+
+        client.sendRaw({
+          chatroomId: state.activeChatId.toString(),
+          userId: currentUser.id.toString(),
+          message: messageBody,
+          type: "Message",
+          messagefrom: "1",
+          messageType: hasAttachment ? "2" : "1",
+        });
+        return;
+      }
+
+      const fileList = files;
+      if (!fileList?.length) return;
+
+      const t = text.trim();
+      const messageTime = formatSesLocalMessageTime(new Date());
+      const optimistic = createOptimisticOutboundMessage({
+        chatId: state.activeChatId,
+        senderId: currentUser.id,
+        senderRole: "agent",
+        text: t,
+        attachments,
+        messageTime,
+      });
+      setState((prev) => ({
+        ...prev,
+        messages: [...prev.messages, optimistic],
+        chats: prev.chats.map((c) =>
+          c.id === state.activeChatId
+            ? { ...c, lastMessage: optimistic }
+            : c,
+        ),
+      }));
 
       client.sendRaw({
         chatroomId: state.activeChatId.toString(),
         userId: currentUser.id.toString(),
-        message: messageBody,
+        // Keep file-message semantics consistent with normal non-chunk sends.
+        message: t || ".",
         type: "Message",
         messagefrom: "1",
-        messageType: hasAttachment ? "2" : "1",
+        messageType: "2",
+      });
+
+      await sendFileChunksViaWebSocket(client, fileList, {
+        userId: currentUser.id.toString(),
+        chatroomId: state.activeChatId,
+        domainIndex: state.domainIndex,
+        chatFrom: state.chatFrom,
+        message: t,
+        agentId: currentUser.id.toString(),
+        messageFrom: "1",
       });
       return;
     }
 
     const messageTime = formatSesLocalMessageTime(new Date());
+    const optimistic = createOptimisticOutboundMessage({
+      chatId: state.activeChatId,
+      senderId: currentUser.id,
+      senderRole: "customer",
+      text: text.trim(),
+      attachments,
+      messageTime,
+    });
+    setState((prev) => ({
+      ...prev,
+      messages: [...prev.messages, optimistic],
+      chats: prev.chats.map((c) =>
+        c.id === state.activeChatId
+          ? { ...c, lastMessage: optimistic }
+          : c,
+      ),
+    }));
+
     client.send({
       type: "send-message",
       payload: {
@@ -860,6 +1178,19 @@ export function useWebSocketChat(currentUser: User | null) {
         msgtime: messageTime,
       },
     });
+    if (files?.length) {
+      const activeChat = state.chats.find((c) => c.id === state.activeChatId);
+      const agentIdForEndOfFile = activeChat?.agent?.id?.toString() ?? "";
+      await sendFileChunksViaWebSocket(client, files, {
+        userId: currentUser.id.toString(),
+        chatroomId: state.activeChatId,
+        domainIndex: state.domainIndex,
+        chatFrom: state.chatFrom,
+        message: text,
+        agentId: agentIdForEndOfFile,
+        messageFrom: "0",
+      });
+    }
   };
 
   const resolveChat = () => {
@@ -928,7 +1259,7 @@ export function useWebSocketChat(currentUser: User | null) {
           userId: currentUser.id.toString(),
           domainIndex: state.domainIndex,
           chatFrom: state.chatFrom,
-          type: "AgentLiveChatStart", //send again when socket reconnects
+          type: "AgentLiveChatStart",
         });
       } catch {
         toast.error("Unable to load this chat right now.");

@@ -207,11 +207,13 @@ export function CustomerChat() {
 
     const payload =
       attachments.length > 0 ? attachments : undefined;
+    const files =
+      filePreviews.length > 0 ? filePreviews.map((fp) => fp.file) : undefined;
 
     if (chat.activeChat) {
-      chat.sendMessage(text, payload);
+      void chat.sendMessage(text, payload, files);
     } else {
-      chat.startChat(text, payload);
+      void chat.startChat(text, payload, files);
     }
     setDraft("");
     setFilePreviews([]);
