@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { messagesAreSameListItem, stableMessageListKey } from "../lib/chat/messageKey";
 import {
   createdAtFromMessageHeaderAndTime,
@@ -723,6 +723,52 @@ export function useWebSocketChat(currentUser: User | null) {
       unsubscribe();
     };
   }, [client, currentUser?.id]);
+
+  const agentLiveChatContextRef = useRef<{
+    activeChatId: string | null;
+    domainIndex: number | null;
+    chatFrom: number | null;
+    userId: string | undefined;
+  }>({
+    activeChatId: null,
+    domainIndex: null,
+    chatFrom: null,
+    userId: undefined,
+  });
+
+  useEffect(() => {
+    agentLiveChatContextRef.current = {
+      activeChatId: state.activeChatId,
+      domainIndex: state.domainIndex,
+      chatFrom: state.chatFrom,
+      userId: currentUser?.id,
+    };
+  }, [
+    state.activeChatId,
+    state.domainIndex,
+    state.chatFrom,
+    currentUser?.id,
+  ]);
+
+  useEffect(() => {
+    if (currentUser?.role !== "agent") return;
+    return client.subscribeOpen(({ isReconnect }) => {
+      if (!isReconnect) return;
+      const ctx = agentLiveChatContextRef.current;
+      if (!ctx.activeChatId || !ctx.userId) return;
+      if (ctx.domainIndex === null || ctx.chatFrom === null) return;
+      client.sendRaw({
+        chatroomId: ctx.activeChatId.toString(),
+        userId: ctx.userId.toString(),
+        domainIndex: ctx.domainIndex,
+        chatFrom: ctx.chatFrom,
+        type: "AgentLiveChatStart",
+      });
+      console.log("[ws] AgentLiveChatStart re-sent after reconnect", {
+        chatroomId: ctx.activeChatId,
+      });
+    });
+  }, [client, currentUser?.role]);
 
   useEffect(() => {
     if (!currentUser) return;
