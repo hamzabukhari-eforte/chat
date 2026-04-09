@@ -129,6 +129,6 @@ export type IncomingEvent =
     }
   | {
       type: "chat-seen";
-      payload: { msgId: string; status: number };
+      payload: { msgId: string; status: 3 | 4 };
     };
 

@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useMemo, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { messagesAreSameListItem, stableMessageListKey } from "../lib/chat/messageKey";
 import {
   createdAtFromMessageHeaderAndTime,
@@ -13,13 +13,28 @@ import {
   stripSesPlaceholderCaption,
 } from "../lib/chat/sesMedia";
 import {
-  chunkCountForFileSize,
+  binaryChunkCountForFileSize,
   FILE_CHUNK_SIZE_BYTES,
-  readFileChunkAsBase64,
 } from "../lib/chat/fileChunks";
 import type { Attachment, Chat, Message, Role, User } from "../lib/chat/types";
 import { ChatWebSocketClient } from "../lib/websocket/client";
 import { toast } from "sonner";
+
+/**
+ * After JSON file metadata, wait for `{ msg: "R", msgtype: "2" }` before binary chunks.
+ * Default off — many SES flows do not ack before binary; enabling avoids hangs when the server
+ * never sends `R` after metadata (symptom: only PDFs seemed to work, images/videos never finish).
+ * Set `NEXT_PUBLIC_WS_FILE_WAIT_ACK_AFTER_METADATA=1` if your gateway requires the handshake.
+ */
+const WS_FILE_WAIT_ACK_AFTER_METADATA =
+  typeof process !== "undefined" &&
+  process.env.NEXT_PUBLIC_WS_FILE_WAIT_ACK_AFTER_METADATA === "1";
+
+/**
+ * After each binary chunk, wait for the same ack before the next chunk.
+ * Set true if the server only signals readiness per chunk (not only once after metadata).
+ */
+const WS_FILE_WAIT_ACK_AFTER_EACH_CHUNK = false;
 
 const DEFAULT_QUEUE_CHATS_URL =
   "http://10.0.10.53:8080/SES/SocialMedia/whatsapp/getQueueNAssignedChats";
@@ -581,6 +596,68 @@ function createOptimisticOutboundMessage(params: {
   };
 }
 
+/** Mirror common SES / Java JSON property names (camelCase vs snake_case vs PascalCase). */
+function withSesBinaryFieldAliases(
+  base: Record<string, unknown>,
+): Record<string, unknown> {
+  const out: Record<string, unknown> = { ...base };
+  if (base.userId != null) out.user_id = base.userId;
+  if (base.chatroomId != null) {
+    out.chat_room_id = base.chatroomId;
+    const n = Number(base.chatroomId);
+    if (!Number.isNaN(n) && String(n) === String(base.chatroomId).trim()) {
+      out.chatroomIdInt = n;
+    }
+  }
+  if (base.fileName != null) {
+    out.file_name = base.fileName;
+    out.FileName = base.fileName;
+  }
+  if (base.fileSize != null) {
+    out.file_size = base.fileSize;
+    out.FileSize = base.fileSize;
+  }
+  if (base.fileType != null) {
+    out.file_type = base.fileType;
+    out.FileType = base.fileType;
+  }
+  if (base.chunkIndex !== undefined) {
+    out.chunk_index = base.chunkIndex;
+    out.ChunkIndex = base.chunkIndex;
+  }
+  if (base.totalChunks !== undefined) {
+    out.total_chunks = base.totalChunks;
+    out.TotalChunks = base.totalChunks;
+  }
+  if (base.chunkData != null && typeof base.chunkData === "string") {
+    out.chunk_data = base.chunkData;
+    out.ChunkData = base.chunkData;
+  }
+  if (base.domainIndex !== undefined && base.domainIndex !== null) {
+    out.domain_index = base.domainIndex;
+  }
+  if (base.chatFrom !== undefined && base.chatFrom !== null) {
+    out.chat_from = base.chatFrom;
+  }
+  if (base.Agentid != null) {
+    out.agent_id = base.Agentid;
+    out.AgentId = base.Agentid;
+  }
+  if (base.messagefrom != null) {
+    out.message_from = base.messagefrom;
+  }
+  if (base.messageType !== undefined && base.messageType !== null) {
+    out.message_type = base.messageType;
+  }
+  if (base.messageTime != null && typeof base.messageTime === "string") {
+    out.message_time = base.messageTime;
+  }
+  if (base.msgtime != null && typeof base.msgtime === "string") {
+    out.msg_time = base.msgtime;
+  }
+  return out;
+}
+
 async function sendFileChunksViaWebSocket(
   client: ChatWebSocketClient,
   files: File[],
@@ -597,67 +674,85 @@ async function sendFileChunksViaWebSocket(
 ): Promise<void> {
   const sleep = (ms: number) =>
     new Promise<void>((resolve) => setTimeout(resolve, ms));
+  const ackTimeoutMs = 120_000;
 
   for (const file of files) {
-    const totalChunks = chunkCountForFileSize(file.size);
-    for (let chunkIndex = 0; chunkIndex < totalChunks; chunkIndex++) {
-      const chunkNumber = chunkIndex + 1;
-      const isLastChunk = chunkIndex === totalChunks - 1;
-      const chunkStartByte = chunkIndex * FILE_CHUNK_SIZE_BYTES;
-      const chunkEndByteExclusive = Math.min(
-        chunkStartByte + FILE_CHUNK_SIZE_BYTES,
-        file.size,
-      );
-      const chunkData = await readFileChunkAsBase64(
-        file,
-        chunkIndex,
-        FILE_CHUNK_SIZE_BYTES,
-      );
-      const payload: Record<string, unknown> = {
-        type: "File",
-        userId: ctx.userId,
-        chatroomId: ctx.chatroomId,
+    const totalChunks = binaryChunkCountForFileSize(file.size);
+    if (typeof console !== "undefined") {
+      console.log("[ws-file] start file transfer (metadata JSON + binary chunks)", {
         fileName: file.name,
         fileSize: file.size,
-        filesize: file.size,
-        size: file.size,
         fileType: file.type,
-        fileMimeType: file.type,
-        /** Many SES backends expect 1-based chunk indexes. */
-        chunkIndex: chunkNumber,
-        /** Keep explicit 0-based index for backends that rely on old behavior. */
-        chunkIndexZeroBased: chunkIndex,
-        chunkNumber,
-        chunkNo: chunkNumber,
-        chunk: chunkNumber,
         totalChunks,
-        totalChunk: totalChunks,
-        chunks: totalChunks,
-        isLastChunk,
-        chunkStartByte,
-        chunkEndByteExclusive,
-        chunkData,
-        data: chunkData,
-        fileData: chunkData,
-      };
-      if (ctx.domainIndex !== null) {
-        payload.domainIndex = ctx.domainIndex;
-      }
-      if (ctx.chatFrom !== null) {
-        payload.chatFrom = ctx.chatFrom;
-      }
-      client.sendRaw(payload);
-
-      // Prevent EOF from racing server-side chunk persistence.
-      if (isLastChunk) {
-        await sleep(300);
-      }
+        chunkSizeBytes: FILE_CHUNK_SIZE_BYTES,
+        chatroomId: ctx.chatroomId,
+        userId: ctx.userId,
+        domainIndex: ctx.domainIndex,
+        chatFrom: ctx.chatFrom,
+        agentId: ctx.agentId,
+        waitAckAfterMetadata: WS_FILE_WAIT_ACK_AFTER_METADATA,
+        waitAckAfterEachChunk: WS_FILE_WAIT_ACK_AFTER_EACH_CHUNK,
+      });
     }
+
+    const fileMetaPayload = withSesBinaryFieldAliases({
+      type: "File",
+      event: "File",
+      messageType: 2,
+      userId: ctx.userId,
+      chatroomId: ctx.chatroomId,
+      fileName: file.name,
+      fileSize: file.size,
+      fileType: file.type,
+      ...(ctx.domainIndex !== null ? { domainIndex: ctx.domainIndex } : {}),
+      ...(ctx.chatFrom !== null ? { chatFrom: ctx.chatFrom } : {}),
+    });
+
+    client.sendRaw(fileMetaPayload);
+
+    if (WS_FILE_WAIT_ACK_AFTER_METADATA) {
+      await client.waitForSesBinaryFileAck(ackTimeoutMs);
+    }
+
+    let chunkIndex = 0;
+    for (
+      let offset = 0;
+      offset < file.size;
+      offset += FILE_CHUNK_SIZE_BYTES
+    ) {
+      const end = Math.min(offset + FILE_CHUNK_SIZE_BYTES, file.size);
+      const slice = file.slice(offset, end);
+      const buf = await slice.arrayBuffer();
+      const chunkByteLength = end - offset;
+
+      if (typeof console !== "undefined") {
+        console.log("[ws-file] outbound binary chunk", {
+          fileName: file.name,
+          chunkIndex,
+          totalChunks,
+          byteOffset: offset,
+          byteLength: chunkByteLength,
+        });
+      }
+
+      if (!client.sendBinary(buf)) {
+        throw new Error("WebSocket is not open; could not send file chunk");
+      }
+
+      if (WS_FILE_WAIT_ACK_AFTER_EACH_CHUNK) {
+        await client.waitForSesBinaryFileAck(ackTimeoutMs);
+      }
+
+      chunkIndex += 1;
+    }
+
+    await sleep(300);
 
     const endOfFilePayload: Record<string, unknown> = {
       chatroomId: ctx.chatroomId,
       userId: ctx.userId,
       type: "EndOfFile",
+      event: "EndOfFile",
       fileName: file.name,
       fileSize: file.size,
       filesize: file.size,
@@ -672,18 +767,19 @@ async function sendFileChunksViaWebSocket(
       messageType: 2,
       messageTime: ctx.messageTime,
       msgtime: ctx.messageTime,
+      ...(ctx.domainIndex !== null ? { domainIndex: ctx.domainIndex } : {}),
+      ...(ctx.chatFrom !== null ? { chatFrom: ctx.chatFrom } : {}),
     };
-    if (ctx.domainIndex !== null) {
-      endOfFilePayload.domainIndex = ctx.domainIndex;
+    const eofAliased = withSesBinaryFieldAliases(endOfFilePayload);
+    if (typeof console !== "undefined") {
+      console.log("[ws-file] sending EndOfFile (payload before wire)", {
+        fileName: file.name,
+        fileSize: file.size,
+        totalChunks,
+        keys: Object.keys(eofAliased).sort(),
+      });
     }
-    if (ctx.chatFrom !== null) {
-      endOfFilePayload.chatFrom = ctx.chatFrom;
-    }
-    client.sendRaw(endOfFilePayload);
-    console.log("[ws] EndOfFile sent (file transfer complete)", {
-      fileName: file.name,
-      chatroomId: ctx.chatroomId,
-    });
+    client.sendRaw(eofAliased);
   }
 }
 
@@ -1092,16 +1188,23 @@ export function useWebSocketChat(currentUser: User | null) {
           : activeChat?.agent?.id?.toString() ?? "";
       const messageFrom: "0" | "1" =
         currentUser.role === "agent" ? "1" : "0";
-      await sendFileChunksViaWebSocket(client, files, {
-        userId: currentUser.id.toString(),
-        chatroomId: "0",
-        domainIndex: state.domainIndex,
-        chatFrom: state.chatFrom,
-        message: text,
-        agentId: agentIdForEndOfFile,
-        messageFrom,
-        messageTime,
-      });
+      try {
+        await sendFileChunksViaWebSocket(client, files, {
+          userId: currentUser.id.toString(),
+          chatroomId: "0",
+          domainIndex: state.domainIndex,
+          chatFrom: state.chatFrom,
+          message: text,
+          agentId: agentIdForEndOfFile,
+          messageFrom,
+          messageTime,
+        });
+      } catch (e) {
+        console.error("[ws-file] upload failed", e);
+        toast.error(
+          e instanceof Error ? e.message : "File upload failed. Try again.",
+        );
+      }
     }
   };
 
@@ -1249,16 +1352,23 @@ export function useWebSocketChat(currentUser: User | null) {
         ...(state.chatFrom !== null ? { chatFrom: state.chatFrom } : {}),
       });
 
-      await sendFileChunksViaWebSocket(client, fileList, {
-        userId: currentUser.id.toString(),
-        chatroomId: state.activeChatId,
-        domainIndex: state.domainIndex,
-        chatFrom: state.chatFrom,
-        message: t,
-        agentId: currentUser.id.toString(),
-        messageFrom: "1",
-        messageTime,
-      });
+      try {
+        await sendFileChunksViaWebSocket(client, fileList, {
+          userId: currentUser.id.toString(),
+          chatroomId: state.activeChatId,
+          domainIndex: state.domainIndex,
+          chatFrom: state.chatFrom,
+          message: t,
+          agentId: currentUser.id.toString(),
+          messageFrom: "1",
+          messageTime,
+        });
+      } catch (e) {
+        console.error("[ws-file] upload failed", e);
+        toast.error(
+          e instanceof Error ? e.message : "File upload failed. Try again.",
+        );
+      }
       return;
     }
 
@@ -1295,16 +1405,23 @@ export function useWebSocketChat(currentUser: User | null) {
     if (files?.length) {
       const activeChat = state.chats.find((c) => c.id === state.activeChatId);
       const agentIdForEndOfFile = activeChat?.agent?.id?.toString() ?? "";
-      await sendFileChunksViaWebSocket(client, files, {
-        userId: currentUser.id.toString(),
-        chatroomId: state.activeChatId,
-        domainIndex: state.domainIndex,
-        chatFrom: state.chatFrom,
-        message: text,
-        agentId: agentIdForEndOfFile,
-        messageFrom: "0",
-        messageTime,
-      });
+      try {
+        await sendFileChunksViaWebSocket(client, files, {
+          userId: currentUser.id.toString(),
+          chatroomId: state.activeChatId,
+          domainIndex: state.domainIndex,
+          chatFrom: state.chatFrom,
+          message: text,
+          agentId: agentIdForEndOfFile,
+          messageFrom: "0",
+          messageTime,
+        });
+      } catch (e) {
+        console.error("[ws-file] upload failed", e);
+        toast.error(
+          e instanceof Error ? e.message : "File upload failed. Try again.",
+        );
+      }
     }
   };
 

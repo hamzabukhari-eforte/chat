@@ -21,7 +21,10 @@ import { AvatarWithInitials } from "../atoms/AvatarWithInitials";
 import { MessageSeenTicks } from "../atoms/MessageSeenTicks";
 import { ChatAudioRecorder } from "../atoms/ChatAudioRecorder";
 import { ChatVideoPlayer } from "../atoms/ChatVideoPlayer";
-import { isVideoFile } from "../../lib/chat/fileAttachment";
+import {
+  isVideoFile,
+  voiceClipFileNameForBlob,
+} from "../../lib/chat/fileAttachment";
 import { HiOutlineChatBubbleLeftRight } from "react-icons/hi2";
 import data from "@emoji-mart/data";
 import Picker from "@emoji-mart/react";
@@ -32,6 +35,7 @@ import {
   formatMessageTimeLabelFromMessage,
   messageGroupKeyFromHeader,
 } from "../../lib/chat/sesMessageTime";
+import { toast } from "sonner";
 import type { Attachment, Chat, Message } from "../../lib/chat/types";
 
 interface Props {
@@ -209,7 +213,7 @@ export function ChatWindowSection({
   const handleVoiceRecordingComplete = async (blob: Blob) => {
     const url = await blobToDataUrl(blob);
     const id = Math.random().toString(36).slice(2);
-    const name = `voice-message-${Date.now()}.webm`;
+    const name = voiceClipFileNameForBlob(blob);
     const file = new File([blob], name, {
       type: blob.type || "audio/webm",
     });
@@ -693,6 +697,7 @@ export function ChatWindowSection({
               <ChatAudioRecorder
                 onRecordingComplete={handleVoiceRecordingComplete}
                 onOpenChange={handleRecorderOpenChange}
+                onError={(msg) => toast.error(msg)}
               />
 
               {/* Emoji Picker Button */}

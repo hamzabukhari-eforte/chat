@@ -81,6 +81,67 @@ export function buildSesMediaUrl(filePath: string, fileName: string): string | n
   return resolveMediaUrl(normalizeBareToRecattachmentsPath(rel));
 }
 
+/** Normalize SES fields: JSON often sends the string `"null"` / `"undefined"`. */
+function cleanSesScalar(v: unknown): string {
+  if (v === undefined || v === null) return "";
+  const s = String(v).trim();
+  const l = s.toLowerCase();
+  if (l === "null" || l === "undefined") return "";
+  return s;
+}
+
+/** `/` or empty is not a real media path — WS echoes use this and must not imply an attachment. */
+function isMeaningfulSesFilePath(path: string): boolean {
+  const p = path.trim();
+  return p.length > 0 && p !== "/";
+}
+
+/** SES sometimes puts delivery UI strings (`sent`, `read`) in `fileName` — not real files. */
+const SES_NON_FILE_BASENAME = new Set([
+  "sent",
+  "delivered",
+  "read",
+  "seen",
+  "pending",
+  "failed",
+  "uploading",
+  "received",
+  "replied",
+  "null",
+  "undefined",
+]);
+
+function hasLikelyFileExtension(name: string): boolean {
+  return /\.[a-z0-9]{2,12}$/i.test(name.trim());
+}
+
+/**
+ * WebSocket payloads sometimes put message or DB ids in `fileName`. Real files almost always
+ * have an extension; pure digits (no `.ext`) are treated as non-filenames for attachment rows.
+ */
+function looksLikePlausibleFileBasename(name: string): boolean {
+  const s = name.trim();
+  if (!s) return false;
+  if (hasLikelyFileExtension(s)) return true;
+  if (/^\d+$/.test(s)) return false;
+  if (SES_NON_FILE_BASENAME.has(s.toLowerCase())) return false;
+  return true;
+}
+
+/** Backend may synthesize `/attachments/chatmedia/sent/sent` for status — not a real media URL. */
+function sesMediaUrlLooksLikeDeliveryPlaceholder(url: string): boolean {
+  const raw = url.trim().toLowerCase();
+  if (!raw) return true;
+  try {
+    const path = new URL(raw).pathname.toLowerCase();
+    if (path.includes("/chatmedia/sent/sent")) return true;
+    if (/\/sent\/sent\/?$/.test(path)) return true;
+  } catch {
+    if (/\/sent\/sent/i.test(raw)) return true;
+  }
+  return false;
+}
+
 /**
  * Build attachment list from SES `msgDetails` (WebSocket) or conversation API rows.
  * msgType is backend-specific; we infer image vs file from extension and common codes.
@@ -90,45 +151,72 @@ export function attachmentsFromSesFields(
   attachmentId: string,
 ): Attachment[] | undefined {
   // SES payloads use different field names depending on endpoint.
-  // Examples:
-  // - `fileName` + `filePath`
-  // - `filename` or `actualFilename` (often includes the full relative path)
-  let fileName = String(
-    fields.fileName ?? fields.actualFilename ?? fields.filename ?? "",
-  ).trim();
-  let filePath = String(fields.filePath ?? "").trim();
-  const message = String(fields.message ?? "").trim();
-  const explicitUrl = String(
+  // Prefer user-facing names — `fileName` is often a storage key or msg id on the socket.
+  let fileName = cleanSesScalar(
+    fields.actualFilename ??
+      fields.originalFileName ??
+      fields.originalFilename ??
+      fields.displayFileName ??
+      fields.userFileName ??
+      fields.FileDisplayName ??
+      fields.fileName ??
+      fields.filename,
+  );
+  let filePath = cleanSesScalar(fields.filePath);
+  const message = cleanSesScalar(fields.message);
+  const explicitUrl = cleanSesScalar(
     fields.fileUrl ??
       fields.mediaUrl ??
       fields.attachmentUrl ??
-      fields.videoUrl ??
-      "",
-  ).trim();
-  const mimeHint = String(
-    fields.mimeType ?? fields.contentType ?? fields.fileMimeType ?? "",
-  ).trim();
+      fields.videoUrl,
+  );
+  const mimeHint = cleanSesScalar(
+    fields.mimeType ?? fields.contentType ?? fields.fileMimeType,
+  );
 
-  const rawType = fields.msgType ?? fields.messageType;
+  // Drop msg/storage id masquerading as fileName so `filePath` / URL basename can win.
+  if (fileName && /^\d{1,16}$/.test(fileName.trim())) {
+    fileName = "";
+  }
+
+  const rawType =
+    fields.msgType ??
+    fields.messageType ??
+    fields.MessageType ??
+    fields.MsgType;
   const msgType =
     typeof rawType === "number"
       ? rawType
       : typeof rawType === "string"
-        ? Number(rawType)
+        ? Number(String(rawType).trim())
         : NaN;
 
   const messageLooksLikeFilename =
     message.length > 0 &&
     /\.[a-z0-9]{2,12}$/i.test(message) &&
     !/\s/.test(message);
+
+  /**
+   * Type `1` = text — ignore stray `filePath` / `fileName` / status noise.
+   * Some APIs still send `messageType: 1` with a real `fileUrl` or `fileName.jpg`; keep those.
+   */
+  const strongMediaEvidenceForType1 =
+    Boolean(explicitUrl) ||
+    (Boolean(fileName) && hasLikelyFileExtension(fileName)) ||
+    messageLooksLikeFilename;
+
+  if (Number.isFinite(msgType) && msgType === 1 && !strongMediaEvidenceForType1) {
+    return undefined;
+  }
+
   const hasAttachmentHint =
     Boolean(explicitUrl) ||
     Boolean(fileName) ||
-    Boolean(filePath) ||
+    isMeaningfulSesFilePath(filePath) ||
     messageLooksLikeFilename;
 
-  // `1` = text-only in your convention — but some payloads still send file fields with msgType 1.
-  if (Number.isFinite(msgType) && msgType === 1 && !hasAttachmentHint) {
+  // Unknown/missing type: keep legacy heuristic so `loadConversationById` rows without type still work.
+  if (!Number.isFinite(msgType) && !hasAttachmentHint) {
     return undefined;
   }
 
@@ -150,15 +238,40 @@ export function attachmentsFromSesFields(
     }
   }
 
+  // Some rows only set `filePath` (e.g. `/recattachments/doc.pdf`) with an empty `fileName`.
+  if (!fileName && isMeaningfulSesFilePath(filePath)) {
+    const base = filePath.split("/").filter(Boolean).pop() ?? "";
+    if (looksLikePlausibleFileBasename(base)) {
+      fileName = base;
+    }
+  }
+
   if (explicitUrl) {
     const url = resolveMediaUrl(
       normalizeBareToRecattachmentsPath(explicitUrl),
     );
-    const name =
-      fileName ||
-      message ||
-      explicitUrl.split("/").pop() ||
-      "attachment";
+    let fromUrl = "";
+    try {
+      const pathOnly = url.split(/[?#]/)[0];
+      fromUrl = pathOnly.split("/").filter(Boolean).pop() ?? "";
+    } catch {
+      fromUrl = "";
+    }
+    let name =
+      fileName && looksLikePlausibleFileBasename(fileName)
+        ? fileName
+        : message && /\.[a-z0-9]{2,12}$/i.test(message) && !message.includes(" ")
+          ? message
+          : "";
+    if (!name || !looksLikePlausibleFileBasename(name)) {
+      name =
+        fromUrl && looksLikePlausibleFileBasename(fromUrl)
+          ? fromUrl
+          : fromUrl || "attachment";
+    }
+    if (sesMediaUrlLooksLikeDeliveryPlaceholder(url)) {
+      return undefined;
+    }
     return [inferAttachment(attachmentId, name, url, msgType, mimeHint)];
   }
 
@@ -168,10 +281,15 @@ export function attachmentsFromSesFields(
       : "";
 
   const effectiveName = fileName || nameFromMessage;
-  if (!effectiveName) return undefined;
+  if (!effectiveName || !looksLikePlausibleFileBasename(effectiveName)) {
+    return undefined;
+  }
 
   const url = buildSesMediaUrl(filePath || "/", effectiveName);
   if (!url) return undefined;
+  if (sesMediaUrlLooksLikeDeliveryPlaceholder(url)) {
+    return undefined;
+  }
 
   return [inferAttachment(attachmentId, effectiveName, url, msgType, mimeHint)];
 }
@@ -203,6 +321,45 @@ function pickFilenameHintForAttachment(name: string, url: string): string {
   return n;
 }
 
+function urlPathBasename(url: string): string {
+  try {
+    const pathOnly = url.split(/[?#]/)[0];
+    return pathOnly.split("/").filter(Boolean).pop() ?? "";
+  } catch {
+    return "";
+  }
+}
+
+/**
+ * Socket/API often set `fileName` to msg id (`478`) or `123.png` while the real name is only in the URL path.
+ */
+function resolveAttachmentDisplayName(preferredName: string, url: string): string {
+  const n = preferredName.trim();
+  const base = urlPathBasename(url);
+  const hasExt = (s: string) => /\.[a-z0-9]{2,12}$/i.test(s);
+  if (!hasExt(base)) {
+    return pickFilenameHintForAttachment(n, url);
+  }
+
+  const stem = (s: string) => s.replace(/\.[a-z0-9]+$/i, "");
+  const baseStem = stem(base);
+  const nameStem = stem(n);
+
+  const baseHasLetters = /[a-z]/i.test(baseStem);
+  const nameIsBareId = !n || /^\d{1,16}$/.test(n);
+  const nameIsDigitsPlusExt =
+    hasExt(n) && nameStem.length > 0 && /^\d+$/.test(nameStem);
+
+  if (baseHasLetters && (nameIsBareId || nameIsDigitsPlusExt)) {
+    return base;
+  }
+  if (nameIsBareId && hasExt(base)) {
+    return base;
+  }
+
+  return pickFilenameHintForAttachment(n, url);
+}
+
 function inferAttachment(
   id: string,
   name: string,
@@ -210,18 +367,37 @@ function inferAttachment(
   msgType: number,
   mimeType?: string,
 ): Attachment {
+  const displayName = resolveAttachmentDisplayName(name, url);
   const mt = (mimeType ?? "").trim().toLowerCase();
   if (mt.startsWith("video/")) {
-    return { id, type: "video", name, url, mimeType: mimeType || undefined };
+    return {
+      id,
+      type: "video",
+      name: displayName,
+      url,
+      mimeType: mimeType || undefined,
+    };
   }
   if (mt.startsWith("audio/")) {
-    return { id, type: "audio", name, url, mimeType: mimeType || undefined };
+    return {
+      id,
+      type: "audio",
+      name: displayName,
+      url,
+      mimeType: mimeType || undefined,
+    };
   }
   if (mt.startsWith("image/")) {
-    return { id, type: "image", name, url, mimeType: mimeType || undefined };
+    return {
+      id,
+      type: "image",
+      name: displayName,
+      url,
+      mimeType: mimeType || undefined,
+    };
   }
 
-  const hint = pickFilenameHintForAttachment(name, url).toLowerCase();
+  const hint = pickFilenameHintForAttachment(displayName, url).toLowerCase();
   const isImage = /\.(jpg|jpeg|png|gif|webp|bmp|svg)$/i.test(hint);
   const isVideo = /\.(mp4|mov|m4v|mkv|avi|mpeg|mpg)$/i.test(hint);
   const isAudio =
@@ -236,7 +412,7 @@ function inferAttachment(
         : isAudio
           ? "audio"
           : "document",
-    name,
+    name: displayName,
     url,
     mimeType: mimeType || undefined,
   };

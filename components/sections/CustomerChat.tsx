@@ -14,13 +14,17 @@ import data from "@emoji-mart/data";
 import Picker from "@emoji-mart/react";
 import { useAuth } from "../../hooks/useAuth";
 import { useWebSocketChat } from "../../hooks/useWebSocketChat";
+import { toast } from "sonner";
 import { attachmentShouldRenderAsVideo } from "../../lib/chat/attachmentDisplay";
 import { stableMessageListKey } from "../../lib/chat/messageKey";
 import { formatMessageTimeLabelFromMessage } from "../../lib/chat/sesMessageTime";
 import type { Attachment, Message } from "../../lib/chat/types";
 import { ChatAudioRecorder } from "../atoms/ChatAudioRecorder";
 import { ChatVideoPlayer } from "../atoms/ChatVideoPlayer";
-import { isVideoFile } from "../../lib/chat/fileAttachment";
+import {
+  isVideoFile,
+  voiceClipFileNameForBlob,
+} from "../../lib/chat/fileAttachment";
 
 const ACCEPTED_IMAGE_TYPES = "image/jpeg,image/png,image/gif,image/webp";
 const ACCEPTED_VIDEO_TYPES = "video/mp4,video/quicktime,video/webm";
@@ -163,7 +167,7 @@ export function CustomerChat() {
   const handleVoiceRecordingComplete = async (blob: Blob) => {
     const url = await blobToDataUrl(blob);
     const id = Math.random().toString(36).slice(2);
-    const name = `voice-message-${Date.now()}.webm`;
+    const name = voiceClipFileNameForBlob(blob);
     const file = new File([blob], name, {
       type: blob.type || "audio/webm",
     });
@@ -368,6 +372,7 @@ export function CustomerChat() {
             <ChatAudioRecorder
               onRecordingComplete={handleVoiceRecordingComplete}
               onOpenChange={handleRecorderOpenChange}
+              onError={(msg) => toast.error(msg)}
             />
 
             <div className="relative shrink-0">

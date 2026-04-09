@@ -6,19 +6,29 @@ import { FiCheck, FiMic, FiSquare, FiTrash2 } from "react-icons/fi";
 export interface ChatAudioRecorderProps {
   onRecordingComplete: (blob: Blob) => void;
   onOpenChange?: (open: boolean) => void;
+  /** Mic denied, unsupported APIs, or empty recording */
+  onError?: (message: string) => void;
   disabled?: boolean;
 }
 
 type Phase = "ready" | "recording" | "review";
 
 function pickMimeType(): string {
+  if (typeof MediaRecorder === "undefined" || !MediaRecorder.isTypeSupported) {
+    return "";
+  }
   const candidates = [
     "audio/webm;codecs=opus",
     "audio/webm",
     "audio/mp4",
+    "audio/mp4;codecs=mp4a.40.2",
+    "audio/aac",
+    "video/mp4",
+    "audio/ogg;codecs=opus",
+    "audio/ogg",
   ];
   for (const t of candidates) {
-    if (typeof MediaRecorder !== "undefined" && MediaRecorder.isTypeSupported(t)) {
+    if (MediaRecorder.isTypeSupported(t)) {
       return t;
     }
   }
@@ -34,6 +44,7 @@ function formatTimer(totalSeconds: number): string {
 export function ChatAudioRecorderInner({
   onRecordingComplete,
   onOpenChange,
+  onError,
   disabled = false,
 }: ChatAudioRecorderProps) {
   const [open, setOpen] = useState(false);
@@ -104,8 +115,22 @@ export function ChatAudioRecorderInner({
   }, [open, closePopover]);
 
   const startRecording = async () => {
+    if (typeof window === "undefined") {
+      return;
+    }
+    if (typeof MediaRecorder === "undefined") {
+      onError?.("Voice recording is not supported in this browser.");
+      return;
+    }
+    const mediaDevices = navigator.mediaDevices;
+    if (!mediaDevices?.getUserMedia) {
+      onError?.(
+        "Microphone is unavailable. Open the app over HTTPS (or localhost) and use a modern browser.",
+      );
+      return;
+    }
     try {
-      const stream = await navigator.mediaDevices.getUserMedia({
+      const stream = await mediaDevices.getUserMedia({
         audio: {
           echoCancellation: true,
           noiseSuppression: true,
@@ -117,10 +142,16 @@ export function ChatAudioRecorderInner({
       const mime = pickMimeType();
       mimeTypeRef.current = mime || "audio/webm";
 
-      const recorder = new MediaRecorder(
-        stream,
-        mime ? { mimeType: mime } : undefined,
-      );
+      let recorder: MediaRecorder;
+      try {
+        recorder = new MediaRecorder(
+          stream,
+          mime ? { mimeType: mime } : undefined,
+        );
+      } catch {
+        recorder = new MediaRecorder(stream);
+        mimeTypeRef.current = recorder.mimeType || "audio/webm";
+      }
       mediaRecorderRef.current = recorder;
 
       recorder.ondataavailable = (e) => {
@@ -154,7 +185,14 @@ export function ChatAudioRecorderInner({
       timerIntervalRef.current = setInterval(() => {
         setSeconds((s) => s + 1);
       }, 1000);
-    } catch {
+    } catch (e) {
+      const msg =
+        e instanceof DOMException && e.name === "NotAllowedError"
+          ? "Microphone permission denied."
+          : e instanceof Error
+            ? e.message
+            : "Could not access the microphone.";
+      onError?.(msg);
       closePopover();
     }
   };
@@ -175,6 +213,10 @@ export function ChatAudioRecorderInner({
 
   const saveReview = () => {
     if (!reviewBlob) return;
+    if (reviewBlob.size === 0) {
+      onError?.("Recording was empty. Try again.");
+      return;
+    }
     onRecordingComplete(reviewBlob);
     revokeReview();
     setPhase("ready");

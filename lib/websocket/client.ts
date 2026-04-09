@@ -14,6 +14,39 @@ type Listener = (event: IncomingEvent) => void;
 type OpenListener = (info: { isReconnect: boolean }) => void;
 type InitializerPayload = object;
 
+type BinaryFileAckWaiter = {
+  resolve: () => void;
+  reject: (e: Error) => void;
+  timer: ReturnType<typeof setTimeout>;
+};
+
+/**
+ * SES file-transfer signals (msgtype `2`):
+ * - `R` = ready for next frame (after JSON metadata or between chunks)
+ * - `C` = chunk received / continue (seen after each binary chunk on some gateways)
+ */
+function isSesBinaryFileReadyAckPayload(o: Record<string, unknown>): boolean {
+  const msg = o.msg ?? o.Msg;
+  const mt =
+    o.msgtype ?? o.msgType ?? o.messageType ?? o.MessageType ?? o.MsgType;
+  const code = String(msg).trim().toUpperCase();
+  const msgOk = code === "R" || code === "C";
+  const typeOk =
+    mt === 2 || mt === "2" || String(mt).trim() === "2";
+  return msgOk && typeOk;
+}
+
+function isSesBinaryFileReadyAck(raw: unknown): boolean {
+  if (!raw || typeof raw !== "object") return false;
+  const o = raw as Record<string, unknown>;
+  if (isSesBinaryFileReadyAckPayload(o)) return true;
+  const data = o.data;
+  if (data && typeof data === "object") {
+    return isSesBinaryFileReadyAckPayload(data as Record<string, unknown>);
+  }
+  return false;
+}
+
 function tryNormalizeBackendEvent(raw: unknown): IncomingEvent | null {
   if (!raw || typeof raw !== "object") return null;
   const o = raw as Record<string, unknown>;
@@ -41,35 +74,111 @@ function tryNormalizeNewChatInQueue(raw: unknown): IncomingEvent | null {
   };
 }
 
-/** SES read/delivery receipt: `{ event: "CHAT_SEEN", msgId, status }`. */
-function tryNormalizeChatSeen(raw: unknown): IncomingEvent | null {
-  if (!raw || typeof raw !== "object") return null;
-  const o = raw as Record<string, unknown>;
-  const isSesShape = String(o.event).toUpperCase() === "CHAT_SEEN";
+/**
+ * Same id resolution order as `NEW_MESSAGE` (`pickBackendMessageId`) so `CHAT_SEEN`
+ * matches the `Message.id` stored from the echo.
+ */
+function pickChatSeenMessageId(o: Record<string, unknown>): string | null {
+  const md =
+    o.msgDetails && typeof o.msgDetails === "object"
+      ? (o.msgDetails as Record<string, unknown>)
+      : o.msg_details && typeof o.msg_details === "object"
+        ? (o.msg_details as Record<string, unknown>)
+        : null;
+  const cd =
+    o.chatDetail && typeof o.chatDetail === "object"
+      ? (o.chatDetail as Record<string, unknown>)
+      : o.chat_detail && typeof o.chat_detail === "object"
+        ? (o.chat_detail as Record<string, unknown>)
+        : null;
   const data =
     o.data && typeof o.data === "object"
       ? (o.data as Record<string, unknown>)
       : null;
-  if (!isSesShape) return null;
 
-  const msgId =
-    o.msgId ??
-    o.messageId ??
-    o.msgIndex ??
-    data?.msgId ??
-    data?.messageId ??
-    data?.msgIndex;
-  if (msgId === undefined || msgId === null) return null;
+  if (md) {
+    const id = pickBackendMessageId(md, o, cd ?? undefined);
+    if (id) return id;
+  }
+  if (
+    data &&
+    (data.msgId != null ||
+      data.messageId != null ||
+      data.msgIndex != null ||
+      data.id != null)
+  ) {
+    const id = pickBackendMessageId(data, o, cd ?? undefined);
+    if (id) return id;
+  }
+  return pickBackendMessageId(o, o, cd ?? undefined);
+}
 
-  const statusRaw =
-    o.status ?? data?.status ?? data?.chatSeenStatus ?? data?.seenStatus;
-  const status =
-    typeof statusRaw === "number" ? statusRaw : Number(String(statusRaw).trim());
-  if (Number.isNaN(status)) return null;
+/** Map SES / wire variants to `3` = delivered, `4` = seen (blue ticks). */
+function parseSesChatSeenStatus(
+  root: Record<string, unknown>,
+  md: Record<string, unknown> | null,
+  data: Record<string, unknown> | null,
+): 3 | 4 | null {
+  const read = (src: Record<string, unknown> | null | undefined): unknown => {
+    if (!src) return undefined;
+    return (
+      src.status ??
+      src.Status ??
+      src.chatSeenStatus ??
+      src.ChatSeenStatus ??
+      src.seenStatus ??
+      src.SeenStatus ??
+      src.chat_seen_status
+    );
+  };
+  const raw = read(root) ?? read(md) ?? read(data);
+  if (raw === undefined || raw === null) return null;
+  if (raw === true || raw === "true" || raw === "TRUE") return 4;
+  if (raw === false || raw === "false" || raw === "FALSE") return 3;
+  if (typeof raw === "string") {
+    const s = raw.trim().toLowerCase();
+    if (s === "seen" || s === "read" || s === "blue") return 4;
+    if (s === "delivered" || s === "sent") return 3;
+  }
+  const n =
+    typeof raw === "number" && Number.isFinite(raw)
+      ? raw
+      : Number(String(raw).trim());
+  if (Number.isNaN(n)) return null;
+  if (n === 3 || n === 4) return n;
+  /** Some gateways use 1/2 instead of 3/4. */
+  if (n === 1) return 3;
+  if (n === 2) return 4;
+  return null;
+}
+
+/** SES read/delivery receipt: `CHAT_SEEN` with same id fields as `NEW_MESSAGE`. */
+function tryNormalizeChatSeen(raw: unknown): IncomingEvent | null {
+  if (!raw || typeof raw !== "object") return null;
+  const o = raw as Record<string, unknown>;
+  const eventLabel = o.event ?? o.type ?? o.Type;
+  if (String(eventLabel).toUpperCase() !== "CHAT_SEEN") return null;
+
+  const msgId = pickChatSeenMessageId(o);
+  if (!msgId) return null;
+
+  const md =
+    o.msgDetails && typeof o.msgDetails === "object"
+      ? (o.msgDetails as Record<string, unknown>)
+      : o.msg_details && typeof o.msg_details === "object"
+        ? (o.msg_details as Record<string, unknown>)
+        : null;
+  const data =
+    o.data && typeof o.data === "object"
+      ? (o.data as Record<string, unknown>)
+      : null;
+
+  const status = parseSesChatSeenStatus(o, md, data);
+  if (status === null) return null;
 
   return {
     type: "chat-seen",
-    payload: { msgId: String(msgId).trim(), status },
+    payload: { msgId, status },
   };
 }
 
@@ -321,8 +430,22 @@ function tryNormalizeNewMessage(raw: unknown): IncomingEvent | null {
     ? `${backendMessageId}-att`
     : `${chatId}-media`;
 
+  /** `messageType` is often on the envelope; merge so attachment gating matches SES rules. */
+  const fieldsForAttachments: Record<string, unknown> = { ...md };
+  if (
+    fieldsForAttachments.msgType === undefined &&
+    fieldsForAttachments.messageType === undefined &&
+    fieldsForAttachments.MessageType === undefined
+  ) {
+    const t =
+      o.msgType ?? o.messageType ?? o.MessageType ?? o.msgtype ?? o.MsgType;
+    if (t !== undefined) {
+      fieldsForAttachments.messageType = t;
+    }
+  }
+
   const attachments = attachmentsFromSesFields(
-    md as Record<string, unknown>,
+    fieldsForAttachments,
     attachmentIdPrefix,
   );
   const displayText = stripSesPlaceholderCaption(
@@ -373,6 +496,7 @@ export class ChatWebSocketClient {
   private hasCompletedOpen = false;
   private url: string;
   private initializer: InitializerPayload | null = null;
+  private fileBinaryAckWaiters: BinaryFileAckWaiter[] = [];
 
   constructor(url = getDefaultWebSocketUrl()) {
     this.url = url;
@@ -405,6 +529,9 @@ export class ChatWebSocketClient {
     this.socket.onmessage = (event) => {
       try {
         const raw: unknown = JSON.parse(event.data);
+        if (isSesBinaryFileReadyAck(raw)) {
+          this.notifySesBinaryFileAck();
+        }
         const normalized =
           tryNormalizeBackendEvent(raw) ??
           tryNormalizeNewMessage(raw) ??
@@ -420,9 +547,17 @@ export class ChatWebSocketClient {
       }
     };
     this.socket.onerror = (error) => {
+      this.rejectAllBinaryFileAckWaiters(
+        new Error(
+          `WebSocket error while waiting for file ack: ${String(error)}`,
+        ),
+      );
       console.error("[ws] error", error);
     };
     this.socket.onclose = () => {
+      this.rejectAllBinaryFileAckWaiters(
+        new Error("WebSocket closed while waiting for file ack"),
+      );
       this.closedSinceLastOpen = true;
       // very naive reconnect
       console.warn("[ws] disconnected, retrying in 2s");
@@ -435,9 +570,152 @@ export class ChatWebSocketClient {
     this.socket.send(JSON.stringify(event));
   }
 
+  /** Raw binary frame (SES legacy file chunks after JSON metadata). */
+  sendBinary(buffer: ArrayBuffer): boolean {
+    if (!this.socket || this.socket.readyState !== WebSocket.OPEN) {
+      console.warn("[ws-file] sendBinary skipped — socket not OPEN");
+      return false;
+    }
+    try {
+      this.socket.send(buffer);
+      return true;
+    } catch (e) {
+      console.error("[ws-file] sendBinary threw", e);
+      return false;
+    }
+  }
+
+  /**
+   * Resolves when the server sends `{ msg: "R" | "C", msgtype: 2 }` (or nested `data`).
+   * FIFO: one ack resolves one waiter (metadata gate and/or per-chunk).
+   */
+  waitForSesBinaryFileAck(timeoutMs = 120_000): Promise<void> {
+    return new Promise((resolve, reject) => {
+      const entry: BinaryFileAckWaiter = {
+        resolve: () => {},
+        reject,
+        timer: 0 as unknown as ReturnType<typeof setTimeout>,
+      };
+      entry.timer = setTimeout(() => {
+        const i = this.fileBinaryAckWaiters.indexOf(entry);
+        if (i >= 0) this.fileBinaryAckWaiters.splice(i, 1);
+        reject(new Error("SES binary file ack timeout"));
+      }, timeoutMs);
+      entry.resolve = () => {
+        clearTimeout(entry.timer);
+        resolve();
+      };
+      this.fileBinaryAckWaiters.push(entry);
+    });
+  }
+
+  private notifySesBinaryFileAck() {
+    const w = this.fileBinaryAckWaiters.shift();
+    if (!w) return;
+    clearTimeout(w.timer);
+    w.resolve();
+  }
+
+  private rejectAllBinaryFileAckWaiters(reason: Error) {
+    while (this.fileBinaryAckWaiters.length > 0) {
+      const w = this.fileBinaryAckWaiters.shift()!;
+      clearTimeout(w.timer);
+      w.reject(reason);
+    }
+  }
+
   sendRaw(payload: Record<string, unknown>) {
-    if (!this.socket || this.socket.readyState !== WebSocket.OPEN) return;
-    this.socket.send(JSON.stringify(payload));
+    const type = payload.type;
+    const isFileFrame =
+      type === "File" || type === "EndOfFile" || type === "file";
+
+    if (!this.socket || this.socket.readyState !== WebSocket.OPEN) {
+      if (isFileFrame && typeof console !== "undefined") {
+        const rs = this.socket?.readyState;
+        console.warn("[ws-file] sendRaw skipped — socket not OPEN", {
+          type,
+          readyState: rs,
+          readyStateLabel:
+            rs === WebSocket.CONNECTING
+              ? "CONNECTING"
+              : rs === WebSocket.OPEN
+                ? "OPEN"
+                : rs === WebSocket.CLOSING
+                  ? "CLOSING"
+                  : rs === WebSocket.CLOSED
+                    ? "CLOSED"
+                    : String(rs),
+          fileName: payload.fileName,
+          chunkIndex: payload.chunkIndex,
+        });
+      }
+      return;
+    }
+
+    let raw: string;
+    try {
+      raw = JSON.stringify(payload);
+    } catch (e) {
+      console.error("[ws-file] JSON.stringify failed", e, {
+        type,
+        fileName: payload.fileName,
+        chunkIndex: payload.chunkIndex,
+      });
+      return;
+    }
+
+    if (isFileFrame && typeof console !== "undefined") {
+      const chunkData =
+        typeof payload.chunkData === "string"
+          ? payload.chunkData
+          : typeof payload.chunk_data === "string"
+            ? payload.chunk_data
+            : "";
+      if (type === "File" || type === "file") {
+        if (chunkData.length === 0) {
+          console.log("[ws-file] outbound File metadata (JSON only, binary chunks follow)", {
+            fileName: payload.fileName,
+            fileSize: payload.fileSize,
+            frameJsonChars: raw.length,
+            userId: payload.userId,
+          });
+        } else {
+          console.log("[ws-file] outbound File frame", {
+            fileName: payload.fileName,
+            fileSize: payload.fileSize,
+            chunkIndex: payload.chunkIndex,
+            chunkNumber: payload.chunkNumber,
+            totalChunks: payload.totalChunks,
+            chunkByteLength: payload.chunkByteLength,
+            chunkDataChars: chunkData.length,
+            frameJsonChars: raw.length,
+            encoding: payload.encoding,
+            chatroomId: payload.chatroomId,
+          });
+        }
+      } else {
+        console.log("[ws-file] outbound EndOfFile frame", {
+          fileName: payload.fileName,
+          fileSize: payload.fileSize,
+          totalChunks: payload.totalChunks,
+          frameJsonChars: raw.length,
+          chatroomId: payload.chatroomId,
+          messageLen:
+            typeof payload.message === "string" ? payload.message.length : 0,
+          Agentid: payload.Agentid,
+        });
+      }
+    }
+
+    try {
+      this.socket.send(raw);
+    } catch (e) {
+      console.error("[ws-file] socket.send threw", e, {
+        type,
+        frameJsonChars: raw.length,
+        fileName: payload.fileName,
+      });
+    }
   }
 
   subscribe(listener: Listener) {
