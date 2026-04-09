@@ -16,7 +16,7 @@ import { useAuth } from "../../hooks/useAuth";
 import { useWebSocketChat } from "../../hooks/useWebSocketChat";
 import { attachmentShouldRenderAsVideo } from "../../lib/chat/attachmentDisplay";
 import { stableMessageListKey } from "../../lib/chat/messageKey";
-import { formatMessageTimeForDisplay } from "../../lib/chat/sesMessageTime";
+import { formatMessageTimeLabelFromMessage } from "../../lib/chat/sesMessageTime";
 import type { Attachment, Message } from "../../lib/chat/types";
 import { ChatAudioRecorder } from "../atoms/ChatAudioRecorder";
 import { ChatVideoPlayer } from "../atoms/ChatVideoPlayer";
@@ -39,13 +39,7 @@ function formatFileSize(bytes: number): string {
   return (bytes / (1024 * 1024)).toFixed(1) + " MB";
 }
 
-function MessageAttachments({
-  message,
-  isMine,
-}: {
-  message: Message;
-  isMine: boolean;
-}) {
+function MessageAttachments({ message }: { message: Message }) {
   if (!message.attachments?.length) return null;
 
   return (
@@ -73,13 +67,10 @@ function MessageAttachments({
           ) : (
             <div
               className={
-                "flex items-center gap-2 px-3 py-2 rounded-lg text-sm " +
-                (isMine
-                  ? "bg-brand-400 text-white"
-                  : "bg-gray-200 text-gray-700")
+                "flex items-center gap-2 px-3 py-2 rounded-lg text-sm bg-gray-200 text-gray-700"
               }
             >
-              <FiFile className="w-4 h-4 shrink-0" />
+              <FiFile className="w-4 h-4 shrink-0 text-gray-700" />
               <span className="truncate max-w-[150px]">{att.name}</span>
             </div>
           )}
@@ -248,7 +239,7 @@ export function CustomerChat() {
                   {isMine ? "Me" : "Ag"}
                 </div>
                 <div className="flex flex-col gap-1 min-w-0">
-                  <MessageAttachments message={message} isMine={isMine} />
+                  <MessageAttachments message={message} />
                   {message.text ? (
                     <div
                       className={
@@ -262,12 +253,7 @@ export function CustomerChat() {
                     </div>
                   ) : null}
                   <span className="text-[10px] text-gray-400">
-                    {message.messageTime?.trim()
-                      ? formatMessageTimeForDisplay(message.messageTime)
-                      : new Date(message.createdAt).toLocaleTimeString([], {
-                          hour: "2-digit",
-                          minute: "2-digit",
-                        })}
+                    {formatMessageTimeLabelFromMessage(message)}
                   </span>
                 </div>
               </div>

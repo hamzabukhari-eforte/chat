@@ -176,38 +176,12 @@ function sesTwelveHourWithSeconds(
 /**
  * Local clock for WebSocket / SES payloads: `HH:MM:SS AM` or `HH:MM:SS PM`
  * (e.g. `09:36:06 AM`). Fixed width so the server can sort reliably.
- * Uses `Intl` when available so seconds match the live wall clock (some stacks
- * had issues relying only on `Date#getSeconds` for outbound payloads).
+ *
+ * Always uses the local `Date` getters — avoids `Intl.DateTimeFormat` quirks
+ * where `formatToParts` can yield wrong `hour` values in some runtimes, which
+ * showed up as wall-clock times being ~hours off in outbound `messageTime`.
  */
 export function formatSesLocalMessageTime(date: Date = new Date()): string {
-  if (typeof Intl !== "undefined" && typeof Intl.DateTimeFormat === "function") {
-    try {
-      const parts = new Intl.DateTimeFormat("en-US", {
-        hour: "numeric",
-        minute: "numeric",
-        second: "numeric",
-        hour12: true,
-      }).formatToParts(date);
-      let hour12 = 12;
-      let minute = 0;
-      let second = 0;
-      let dayPeriod = "AM";
-      let hasSecondPart = false;
-      for (const p of parts) {
-        if (p.type === "hour") hour12 = Number(p.value);
-        if (p.type === "minute") minute = Number(p.value);
-        if (p.type === "second") {
-          hasSecondPart = true;
-          second = Number(p.value);
-        }
-        if (p.type === "dayPeriod") dayPeriod = p.value.toUpperCase();
-      }
-      if (!hasSecondPart) second = date.getSeconds();
-      return sesTwelveHourWithSeconds(hour12, minute, second, dayPeriod);
-    } catch {
-      // fall through to numeric fields
-    }
-  }
   const h24 = date.getHours();
   const min = date.getMinutes();
   const sec = date.getSeconds();
@@ -245,6 +219,26 @@ export function formatMessageTimeForDisplay(raw: string): string {
   const ampm = t.replace(/^(\d{1,2}:\d{2}):\d{2}(\s*[AP]M)$/i, "$1$2");
   if (ampm !== t) return ampm;
   return t.replace(/^(\d{1,2}:\d{2}):\d{2}$/, "$1");
+}
+
+/**
+ * Clock label next to a bubble: derive from `createdAt` (ISO instant) in the
+ * **viewer's** local timezone. Server `messageTime` may reflect another zone;
+ * `createdAt` matches that instant unambiguously.
+ */
+export function formatMessageTimeLabelFromMessage(message: {
+  createdAt: string;
+  messageTime?: string;
+}): string {
+  const d = new Date(message.createdAt);
+  if (!Number.isNaN(d.getTime())) {
+    return d.toLocaleTimeString(undefined, {
+      hour: "numeric",
+      minute: "2-digit",
+    });
+  }
+  const mt = message.messageTime?.trim();
+  return mt ? formatMessageTimeForDisplay(mt) : "";
 }
 
 /** If `raw` is a 12h clock (with or without seconds), returns fixed `HH:MM:SS AM`; else `null`. */

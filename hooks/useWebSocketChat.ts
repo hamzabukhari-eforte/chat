@@ -540,6 +540,23 @@ function mergeChatsById(prev: Chat[], incoming: Chat[]): Chat[] {
 
 const OPTIMISTIC_MSG_ID_PREFIX = "optimistic-local:";
 
+/**
+ * Optimistic sends use `currentUser.id`; SES `NEW_MESSAGE` often sets agent
+ * `senderId` from assignee display (e.g. "You"). Treat as same outbound when
+ * roles match so we replace the placeholder and keep server `id` for ticks.
+ */
+function optimisticSenderMatchesIncomingEcho(
+  optimistic: Message,
+  incoming: Message,
+): boolean {
+  if (optimistic.senderId === incoming.senderId) return true;
+  if (optimistic.senderRole !== incoming.senderRole) return false;
+  if (optimistic.senderRole === "agent" && incoming.senderRole === "agent") {
+    return true;
+  }
+  return false;
+}
+
 function createOptimisticOutboundMessage(params: {
   chatId: string;
   senderId: string;
@@ -575,11 +592,22 @@ async function sendFileChunksViaWebSocket(
     message: string;
     agentId: string;
     messageFrom: "0" | "1";
+    messageTime: string;
   },
 ): Promise<void> {
+  const sleep = (ms: number) =>
+    new Promise<void>((resolve) => setTimeout(resolve, ms));
+
   for (const file of files) {
     const totalChunks = chunkCountForFileSize(file.size);
     for (let chunkIndex = 0; chunkIndex < totalChunks; chunkIndex++) {
+      const chunkNumber = chunkIndex + 1;
+      const isLastChunk = chunkIndex === totalChunks - 1;
+      const chunkStartByte = chunkIndex * FILE_CHUNK_SIZE_BYTES;
+      const chunkEndByteExclusive = Math.min(
+        chunkStartByte + FILE_CHUNK_SIZE_BYTES,
+        file.size,
+      );
       const chunkData = await readFileChunkAsBase64(
         file,
         chunkIndex,
@@ -591,10 +619,26 @@ async function sendFileChunksViaWebSocket(
         chatroomId: ctx.chatroomId,
         fileName: file.name,
         fileSize: file.size,
+        filesize: file.size,
+        size: file.size,
         fileType: file.type,
-        chunkIndex,
+        fileMimeType: file.type,
+        /** Many SES backends expect 1-based chunk indexes. */
+        chunkIndex: chunkNumber,
+        /** Keep explicit 0-based index for backends that rely on old behavior. */
+        chunkIndexZeroBased: chunkIndex,
+        chunkNumber,
+        chunkNo: chunkNumber,
+        chunk: chunkNumber,
         totalChunks,
+        totalChunk: totalChunks,
+        chunks: totalChunks,
+        isLastChunk,
+        chunkStartByte,
+        chunkEndByteExclusive,
         chunkData,
+        data: chunkData,
+        fileData: chunkData,
       };
       if (ctx.domainIndex !== null) {
         payload.domainIndex = ctx.domainIndex;
@@ -603,17 +647,38 @@ async function sendFileChunksViaWebSocket(
         payload.chatFrom = ctx.chatFrom;
       }
       client.sendRaw(payload);
+
+      // Prevent EOF from racing server-side chunk persistence.
+      if (isLastChunk) {
+        await sleep(300);
+      }
     }
 
-    const endOfFilePayload = {
+    const endOfFilePayload: Record<string, unknown> = {
       chatroomId: ctx.chatroomId,
       userId: ctx.userId,
-      type: "EndOfFile" as const,
+      type: "EndOfFile",
+      fileName: file.name,
+      fileSize: file.size,
+      filesize: file.size,
+      size: file.size,
+      fileType: file.type,
+      totalChunks,
+      totalChunk: totalChunks,
+      chunks: totalChunks,
       Agentid: ctx.agentId,
       messagefrom: ctx.messageFrom,
       message: ctx.message,
       messageType: 2,
+      messageTime: ctx.messageTime,
+      msgtime: ctx.messageTime,
     };
+    if (ctx.domainIndex !== null) {
+      endOfFilePayload.domainIndex = ctx.domainIndex;
+    }
+    if (ctx.chatFrom !== null) {
+      endOfFilePayload.chatFrom = ctx.chatFrom;
+    }
     client.sendRaw(endOfFilePayload);
     console.log("[ws] EndOfFile sent (file transfer complete)", {
       fileName: file.name,
@@ -728,8 +793,9 @@ export function useWebSocketChat(currentUser: User | null) {
               if (!String(m.id ?? "").startsWith(OPTIMISTIC_MSG_ID_PREFIX))
                 return false;
               if (m.chatId !== incoming.chatId) return false;
-              if (m.senderId !== incoming.senderId) return false;
               if (m.senderRole !== incoming.senderRole) return false;
+              if (!optimisticSenderMatchesIncomingEcho(m, incoming))
+                return false;
               return captionKey(m) === incomingCaption;
             });
 
@@ -737,8 +803,9 @@ export function useWebSocketChat(currentUser: User | null) {
               if (!String(m.id ?? "").startsWith(OPTIMISTIC_MSG_ID_PREFIX))
                 return true;
               if (m.chatId !== incoming.chatId) return true;
-              if (m.senderId !== incoming.senderId) return true;
               if (m.senderRole !== incoming.senderRole) return true;
+              if (!optimisticSenderMatchesIncomingEcho(m, incoming))
+                return true;
               return captionKey(m) !== incomingCaption;
             });
 
@@ -759,9 +826,21 @@ export function useWebSocketChat(currentUser: User | null) {
                   }
                 : incoming;
 
+            /** SES often echoes a wall-clock string that does not match send time; keep client send instant. */
+            const opt = optimisticMatches[0];
+            const echoWithClientTime: Message =
+              opt != null
+                ? {
+                    ...mergedIncoming,
+                    createdAt: opt.createdAt,
+                    messageTime:
+                      opt.messageTime ?? mergedIncoming.messageTime,
+                  }
+                : mergedIncoming;
+
             if (
               withoutMatchingOptimistic.some((m) =>
-                messagesAreSameListItem(m, mergedIncoming),
+                messagesAreSameListItem(m, echoWithClientTime),
               )
             ) {
               if (withoutMatchingOptimistic.length === prev.messages.length) {
@@ -770,7 +849,7 @@ export function useWebSocketChat(currentUser: User | null) {
               return { ...prev, messages: withoutMatchingOptimistic };
             }
             const applied = applyPendingSeenToMessage(
-              mergedIncoming,
+              echoWithClientTime,
               prev.pendingSeenByMsgId,
             );
             return {
@@ -839,22 +918,43 @@ export function useWebSocketChat(currentUser: User | null) {
             const n = Number(status);
             if (n !== 3 && n !== 4) return prev;
             const st = (n === 4 ? 4 : 3) as 3 | 4;
-            const key = String(msgId);
+            const key = String(msgId).trim();
+
+            const applySeenToMessage = (m: Message): Message => {
+              if (m.id == null) return m;
+              if (String(m.id).trim() !== key) return m;
+              return { ...m, chatSeenStatus: st };
+            };
+
             const matched = prev.messages.some(
-              (m) => m.id != null && String(m.id) === key,
+              (m) => m.id != null && String(m.id).trim() === key,
             );
-            const messages = prev.messages.map((m) =>
-              m.id != null && String(m.id) === key
-                ? { ...m, chatSeenStatus: st }
-                : m,
-            );
+
+            const messages = prev.messages.map(applySeenToMessage);
+
+            const chats = prev.chats.map((c) => {
+              const lm = c.lastMessage;
+              if (!lm?.id) return c;
+              if (String(lm.id).trim() !== key) return c;
+              return {
+                ...c,
+                lastMessage: { ...lm, chatSeenStatus: st },
+              };
+            });
+
             if (matched) {
               const { [key]: _, ...rest } = prev.pendingSeenByMsgId;
-              return { ...prev, messages, pendingSeenByMsgId: rest };
+              return {
+                ...prev,
+                messages,
+                chats,
+                pendingSeenByMsgId: rest,
+              };
             }
             return {
               ...prev,
               messages,
+              chats,
               pendingSeenByMsgId: { ...prev.pendingSeenByMsgId, [key]: st },
             };
           }
@@ -1000,6 +1100,7 @@ export function useWebSocketChat(currentUser: User | null) {
         message: text,
         agentId: agentIdForEndOfFile,
         messageFrom,
+        messageTime,
       });
     }
   };
@@ -1099,6 +1200,13 @@ export function useWebSocketChat(currentUser: User | null) {
           type: "Message",
           messagefrom: "1",
           messageType: hasAttachment ? "2" : "1",
+          Agentid: currentUser.id.toString(),
+          messageTime,
+          msgtime: messageTime,
+          ...(state.domainIndex !== null
+            ? { domainIndex: state.domainIndex }
+            : {}),
+          ...(state.chatFrom !== null ? { chatFrom: state.chatFrom } : {}),
         });
         return;
       }
@@ -1129,11 +1237,16 @@ export function useWebSocketChat(currentUser: User | null) {
       client.sendRaw({
         chatroomId: state.activeChatId.toString(),
         userId: currentUser.id.toString(),
-        // Keep file-message semantics consistent with normal non-chunk sends.
-        message: t || ".",
+        // Avoid duplicate text rows: caption is sent on EndOfFile for file messages.
+        message: "",
         type: "Message",
         messagefrom: "1",
         messageType: "2",
+        Agentid: currentUser.id.toString(),
+        messageTime,
+        msgtime: messageTime,
+        ...(state.domainIndex !== null ? { domainIndex: state.domainIndex } : {}),
+        ...(state.chatFrom !== null ? { chatFrom: state.chatFrom } : {}),
       });
 
       await sendFileChunksViaWebSocket(client, fileList, {
@@ -1144,6 +1257,7 @@ export function useWebSocketChat(currentUser: User | null) {
         message: t,
         agentId: currentUser.id.toString(),
         messageFrom: "1",
+        messageTime,
       });
       return;
     }
@@ -1189,6 +1303,7 @@ export function useWebSocketChat(currentUser: User | null) {
         message: text,
         agentId: agentIdForEndOfFile,
         messageFrom: "0",
+        messageTime,
       });
     }
   };

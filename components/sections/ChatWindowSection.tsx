@@ -29,7 +29,7 @@ import { attachmentShouldRenderAsVideo } from "../../lib/chat/attachmentDisplay"
 import { stableMessageListKey } from "../../lib/chat/messageKey";
 import {
   formatChatDateSeparatorLabel,
-  formatMessageTimeForDisplay,
+  formatMessageTimeLabelFromMessage,
   messageGroupKeyFromHeader,
 } from "../../lib/chat/sesMessageTime";
 import type { Attachment, Chat, Message } from "../../lib/chat/types";
@@ -58,11 +58,11 @@ interface FilePreview {
   previewUrl?: string;
 }
 
-/** Prefer `messageHeader` + clock from the API (seconds stripped in the label); fallback to `createdAt`. */
+/** Prefer `messageHeader` + local time from `createdAt`; fallback to `createdAt` for the pill. */
 function dateSeparatorLabelFromMessage(message: Message): string {
   const h = message.messageHeader?.trim();
-  const t = message.messageTime?.trim();
-  if (h && t) return `${h}, ${formatMessageTimeForDisplay(t)}`;
+  const timeLabel = formatMessageTimeLabelFromMessage(message);
+  if (h && timeLabel) return `${h}, ${timeLabel}`;
   if (h) return h;
   return formatChatDateSeparatorLabel(message.createdAt);
 }
@@ -344,7 +344,6 @@ export function ChatWindowSection({
       >
         {sortedMessages.map((message, index, arr) => {
           const isAgent = message.senderRole === "agent";
-          const currentDate = new Date(message.createdAt);
           const prevMessage = index > 0 ? arr[index - 1] : null;
           const groupKey = messageGroupKeyFromHeader(
             message.messageHeader,
@@ -359,12 +358,7 @@ export function ChatWindowSection({
           const shouldShowDate =
             !prevMessage || groupKey !== prevGroupKey;
 
-          const timeStr = message.messageTime?.trim()
-            ? formatMessageTimeForDisplay(message.messageTime)
-            : currentDate.toLocaleTimeString([], {
-                hour: "2-digit",
-                minute: "2-digit",
-              });
+          const timeStr = formatMessageTimeLabelFromMessage(message);
 
           const datePillLabel = dateSeparatorLabelFromMessage(message);
           return (
@@ -419,12 +413,12 @@ export function ChatWindowSection({
                                 type="button"
                                 onClick={() => downloadAttachment(att)}
                                 disabled={!att.url}
-                                className="flex items-center gap-2 bg-brand-400 text-white px-3 py-2 rounded-lg hover:bg-brand-500 transition-colors cursor-pointer disabled:opacity-60 disabled:cursor-not-allowed"
+                                className="flex items-center gap-2 bg-gray-200 text-gray-700 px-3 py-2 rounded-lg hover:bg-gray-300 transition-colors cursor-pointer disabled:opacity-60 disabled:cursor-not-allowed"
                               >
-                                <div className="w-8 h-8 rounded-md bg-brand-300/30 flex items-center justify-center shrink-0">
+                                <div className="w-8 h-8 rounded-md bg-gray-300 flex items-center justify-center shrink-0">
                                   {getFileIcon(
                                     getFileExtension(att.name),
-                                    "w-5 h-5",
+                                    "w-5 h-5 text-gray-700",
                                   )}
                                 </div>
                                 <div className="flex flex-col min-w-0">
@@ -435,7 +429,7 @@ export function ChatWindowSection({
                                     {getFileBaseName(att.name)}
                                   </span>
                                   {getFileExtension(att.name) && (
-                                    <span className="text-[10px] text-white/80 uppercase leading-3">
+                                    <span className="text-[10px] text-gray-500 uppercase leading-3">
                                       {getFileExtension(att.name)}
                                     </span>
                                   )}

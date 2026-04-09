@@ -1,6 +1,6 @@
 import {
   createdAtFromMessageHeaderAndTime,
-  enrichSesWireTimeIfSecondsWereZero,
+  formatSesLocalMessageTime,
   splitSesMessageHeader,
   tryFormatMessageTimeForSesWire,
 } from "../chat/sesMessageTime";
@@ -45,16 +45,31 @@ function tryNormalizeNewChatInQueue(raw: unknown): IncomingEvent | null {
 function tryNormalizeChatSeen(raw: unknown): IncomingEvent | null {
   if (!raw || typeof raw !== "object") return null;
   const o = raw as Record<string, unknown>;
-  if (String(o.event).toUpperCase() !== "CHAT_SEEN") return null;
-  const msgId = o.msgId ?? o.messageId ?? o.msgIndex;
+  const isSesShape = String(o.event).toUpperCase() === "CHAT_SEEN";
+  const data =
+    o.data && typeof o.data === "object"
+      ? (o.data as Record<string, unknown>)
+      : null;
+  if (!isSesShape) return null;
+
+  const msgId =
+    o.msgId ??
+    o.messageId ??
+    o.msgIndex ??
+    data?.msgId ??
+    data?.messageId ??
+    data?.msgIndex;
   if (msgId === undefined || msgId === null) return null;
-  const statusRaw = o.status;
+
+  const statusRaw =
+    o.status ?? data?.status ?? data?.chatSeenStatus ?? data?.seenStatus;
   const status =
-    typeof statusRaw === "number" ? statusRaw : Number(statusRaw);
+    typeof statusRaw === "number" ? statusRaw : Number(String(statusRaw).trim());
   if (Number.isNaN(status)) return null;
+
   return {
     type: "chat-seen",
-    payload: { msgId: String(msgId), status },
+    payload: { msgId: String(msgId).trim(), status },
   };
 }
 
@@ -93,6 +108,71 @@ function parseWsMsgTime(raw: string): string {
   return new Date().toISOString();
 }
 
+/** Avoid treating `07:45:05 AM` as `Date.parse` input for fields named like `createdAt`. */
+function looksLikePlainClockString(s: string): boolean {
+  return (
+    /^\d{1,2}:\d{2}/.test(s) &&
+    !/^\d{4}-\d{2}-\d{2}/.test(s) &&
+    !/^\d{1,2}\/\d{1,2}\/\d{2,4}/.test(s)
+  );
+}
+
+function unixishMsToIso(n: number): string | null {
+  const ms = n < 1e12 ? n * 1000 : n;
+  const d = new Date(ms);
+  if (Number.isNaN(d.getTime())) return null;
+  return d.toISOString();
+}
+
+function coerceUnknownToIsoInstant(raw: unknown): string | null {
+  if (raw === undefined || raw === null) return null;
+  if (typeof raw === "number" && Number.isFinite(raw)) {
+    return unixishMsToIso(raw);
+  }
+  const s = String(raw).trim();
+  if (!s) return null;
+  if (looksLikePlainClockString(s)) return null;
+  const d = new Date(s);
+  if (Number.isNaN(d.getTime())) return null;
+  return d.toISOString();
+}
+
+/**
+ * Prefer an explicit instant from the wire (`createdAt`, unix `timestamp`, etc.)
+ * before combining `messageHeader` + clock strings (server clocks often skew).
+ */
+function tryCanonicalCreatedAtFromFields(
+  ...sources: Array<Record<string, unknown> | null | undefined>
+): string | null {
+  const keys = [
+    "createdAt",
+    "created_at",
+    "messageDate",
+    "msgDate",
+    "dateTime",
+    "DateTime",
+    "utcDateTime",
+  ] as const;
+  for (const src of sources) {
+    if (!src) continue;
+    for (const key of keys) {
+      const iso = coerceUnknownToIsoInstant(src[key]);
+      if (iso) return iso;
+    }
+    const ts = src.timestamp ?? src.msgTimestamp;
+    if (ts !== undefined && ts !== null) {
+      if (typeof ts === "number" && Number.isFinite(ts)) {
+        const iso = unixishMsToIso(ts);
+        if (iso) return iso;
+      } else if (typeof ts === "string" && /^\d+$/.test(ts.trim())) {
+        const iso = unixishMsToIso(Number(ts.trim()));
+        if (iso) return iso;
+      }
+    }
+  }
+  return null;
+}
+
 function pickBackendMessageId(
   md: Record<string, unknown>,
   root: Record<string, unknown>,
@@ -129,21 +209,23 @@ function pickBackendMessageId(
 }
 
 /**
- * SES often sends `messageTime` with `:00` seconds. After normalization, replace that
- * with the current local second so the UI and sort keys reflect receive time.
+ * Align `messageTime` with `createdAt`. The server clock string can disagree with the
+ * ISO instant (zone / rounding); we also used to inject "live" seconds on `:00`, which
+ * broke parity with `createdAt`. Derive the SES wire clock from the parsed instant.
  */
 function enrichIncomingMessageTimes(event: IncomingEvent): IncomingEvent {
   if (event.type !== "message") return event;
   const msg = event.payload.message;
-  const mt = msg.messageTime?.trim();
-  if (!mt) return event;
-  const normalizedClock = tryFormatMessageTimeForSesWire(mt) ?? mt;
-  const withLiveSec = enrichSesWireTimeIfSecondsWereZero(normalizedClock);
-  if (withLiveSec === mt && normalizedClock === mt) return event;
+  const createdAt = msg.createdAt?.trim();
+  if (!createdAt) return event;
+  const d = new Date(createdAt);
+  if (Number.isNaN(d.getTime())) return event;
+  const wireFromInstant = formatSesLocalMessageTime(d);
+  if (msg.messageTime?.trim() === wireFromInstant) return event;
   return {
     type: "message",
     payload: {
-      message: { ...msg, messageTime: withLiveSec },
+      message: { ...msg, messageTime: wireFromInstant },
     },
   };
 }
@@ -157,7 +239,6 @@ function tryNormalizeNewMessage(raw: unknown): IncomingEvent | null {
   const chatDetail = o.chatDetail;
   const msgDetails = o.msgDetails;
   const dataPayload = o.data;
-
   let cd: Record<string, unknown>;
   let md: Record<string, unknown>;
 
@@ -199,15 +280,18 @@ function tryNormalizeNewMessage(raw: unknown): IncomingEvent | null {
   const embeddedClock = messageHeader
     ? splitSesMessageHeader(messageHeader).embeddedTime
     : "";
+  /** Do not use `timestamp` here — it is often unix ms and must not be parsed as a clock. */
   const msgTimeRaw = String(
-    md.msgtime ?? md.messageTime ?? md.msgTime ?? md.timestamp ?? "",
+    md.msgtime ?? md.messageTime ?? md.msgTime ?? "",
   ).trim() || embeddedClock;
   const messageTimeWire = msgTimeRaw
     ? tryFormatMessageTimeForSesWire(msgTimeRaw) ?? msgTimeRaw
     : undefined;
-  const createdAt = messageHeader
-    ? createdAtFromMessageHeaderAndTime(messageHeader, msgTimeRaw)
-    : parseWsMsgTime(msgTimeRaw);
+  const createdAt =
+    tryCanonicalCreatedAtFromFields(md, o) ??
+    (messageHeader
+      ? createdAtFromMessageHeaderAndTime(messageHeader, msgTimeRaw)
+      : parseWsMsgTime(msgTimeRaw));
 
   // Prefer explicit boolean when provided (your payload uses `isFromAgent`).
   const isFromAgent = md.isFromAgent;

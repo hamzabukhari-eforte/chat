@@ -147,9 +147,9 @@ export function ChatSidebarSection({
                       {timeLabel}
                     </span>
                   </div>
-                  <p className="text-sm text-gray-500 truncate">
-                    {chat.lastMessage?.text ?? "New conversation"}
-                  </p>
+                  {/* <p className="text-xs text-gray-500 truncate">
+                    {chat.customer.phone ?? ""}
+                  </p> */}
                 </div>
               </button>
             );
@@ -226,9 +226,9 @@ export function ChatSidebarSection({
                       </span>
                     )}
                   </div>
-                  <p className="text-sm text-gray-500 truncate">
-                    {chat.lastMessage?.text ?? ""}
-                  </p>
+                  {/* <p className="text-xs text-gray-500 truncate">
+                    {chat.customer.phone ?? ""}
+                  </p> */}
                 </div>
               </button>
             );
