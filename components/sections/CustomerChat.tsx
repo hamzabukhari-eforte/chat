@@ -53,14 +53,15 @@ function MessageAttachments({ message }: { message: Message }) {
           {attachmentShouldRenderAsVideo(att) && att.url ? (
             <ChatVideoPlayer url={att.url} maxWidth={280} />
           ) : att.type === "image" && att.url ? (
-            <Image
-              src={att.url}
-              alt={att.name}
-              width={200}
-              height={150}
-              unoptimized
-              className="rounded-lg object-cover max-w-[200px] max-h-[150px]"
-            />
+            <div className="relative w-[200px] h-[150px]">
+              <Image
+                src={att.url}
+                alt={att.name}
+                fill
+                unoptimized
+                className="rounded-lg object-cover"
+              />
+            </div>
           ) : att.type === "audio" && att.url ? (
             <audio
               src={att.url}

@@ -396,14 +396,15 @@ export function ChatWindowSection({
                                 aria-label={`Preview image: ${att.name}`}
                                 className="cursor-pointer"
                               >
-                                <Image
-                                  src={att.url}
-                                  alt={att.name}
-                                  width={200}
-                                  height={150}
-                                  unoptimized
-                                  className="rounded-lg object-cover max-w-[200px] max-h-[150px] hover:opacity-90 transition-opacity"
-                                />
+                                <div className="relative w-[200px] h-[150px]">
+                                  <Image
+                                    src={att.url}
+                                    alt={att.name}
+                                    fill
+                                    unoptimized
+                                    className="rounded-lg object-cover hover:opacity-90 transition-opacity"
+                                  />
+                                </div>
                               </button>
                             ) : att.type === "audio" && att.url ? (
                               <audio
@@ -488,14 +489,15 @@ export function ChatWindowSection({
                                 aria-label={`Preview image: ${att.name}`}
                                 className="cursor-pointer"
                               >
-                                <Image
-                                  src={att.url}
-                                  alt={att.name}
-                                  width={200}
-                                  height={150}
-                                  unoptimized
-                                  className="rounded-lg object-cover max-w-[200px] max-h-[150px] hover:opacity-90 transition-opacity"
-                                />
+                                <div className="relative w-[200px] h-[150px]">
+                                  <Image
+                                    src={att.url}
+                                    alt={att.name}
+                                    fill
+                                    unoptimized
+                                    className="rounded-lg object-cover hover:opacity-90 transition-opacity"
+                                  />
+                                </div>
                               </button>
                             ) : att.type === "audio" && att.url ? (
                               <audio

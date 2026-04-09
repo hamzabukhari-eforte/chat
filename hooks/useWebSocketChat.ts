@@ -43,14 +43,21 @@ const DEFAULT_LOAD_CONVERSATION_URL =
   "http://10.0.10.53:8080/SES/SocialMedia/whatsapp/loadConversationById";
 const DEFAULT_ASSIGN_CHAT_URL =
   "http://10.0.10.53:8080/SES/SocialMedia/whatsapp/assignChat";
-const DEFAULT_CHAT_WS_URL = "ws://10.0.10.53:8080/SES/WebLiveChat";
+const DEFAULT_CHAT_WS_HOST = "10.0.10.53:8080";
+const DEFAULT_CHAT_WS_PATH = "/SES/WebLiveChat";
 
 function getChatWebSocketUrl(): string {
   const fromEnv =
     typeof process !== "undefined" && process.env.NEXT_PUBLIC_CHAT_WS_URL
       ? process.env.NEXT_PUBLIC_CHAT_WS_URL
       : undefined;
-  return fromEnv ?? DEFAULT_CHAT_WS_URL;
+  if (fromEnv) return fromEnv;
+  if (typeof window === "undefined") {
+    return `ws://${DEFAULT_CHAT_WS_HOST}${DEFAULT_CHAT_WS_PATH}`;
+  }
+  const isHttps = window.location.protocol === "https:";
+  const protocol = isHttps ? "wss:" : "ws:";
+  return `${protocol}//${DEFAULT_CHAT_WS_HOST}${DEFAULT_CHAT_WS_PATH}`;
 }
 
 function getLoadConversationUrl(): string {
@@ -328,7 +335,27 @@ function mapApiRowToMessage(
   const attachmentIdPrefix = id
     ? `${id}-att`
     : `${chatId}-row-${index}-media`;
-  const attachments = attachmentsFromSesFields(fields, attachmentIdPrefix);
+
+  // loadConversationById contract:
+  // messageType 1 => text-only
+  // messageType 2 => attachment row
+  const rawApiMessageType =
+    fields.messageType ??
+    fields.msgType ??
+    fields.MessageType ??
+    fields.msgtype ??
+    fields.MsgType;
+  const apiMessageType =
+    typeof rawApiMessageType === "number"
+      ? rawApiMessageType
+      : typeof rawApiMessageType === "string"
+        ? Number(rawApiMessageType.trim())
+        : NaN;
+
+  const attachments =
+    Number.isFinite(apiMessageType) && apiMessageType === 2
+      ? attachmentsFromSesFields(fields, attachmentIdPrefix)
+      : undefined;
   const displayText = stripSesPlaceholderCaption(
     text,
     Boolean(attachments?.length),
