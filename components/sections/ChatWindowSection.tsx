@@ -474,9 +474,11 @@ export function ChatWindowSection({
                         ))}
                       </div>
                     )}
-                    {message.text && (
+                    {(message.text?.length ?? 0) > 0 && (
                       <div className="bg-brand-500 text-white rounded-2xl rounded-tr-sm px-4 py-2.5 inline-block max-w-md">
-                        <p className="text-sm">{message.text}</p>
+                        <p className="text-sm whitespace-pre-wrap break-words">
+                          {message.text}
+                        </p>
                       </div>
                     )}
                     <div className="flex items-center justify-end gap-1 mt-1">
@@ -578,9 +580,11 @@ export function ChatWindowSection({
                         ))}
                       </div>
                     )}
-                    {message.text && (
+                    {(message.text?.length ?? 0) > 0 && (
                       <div className="bg-gray-100 rounded-2xl rounded-tl-sm px-4 py-2.5 inline-block max-w-md">
-                        <p className="text-sm text-gray-800">{message.text}</p>
+                        <p className="text-sm text-gray-800 whitespace-pre-wrap break-words">
+                          {message.text}
+                        </p>
                       </div>
                     )}
                     <span className="text-xs text-gray-400 mt-1 block">

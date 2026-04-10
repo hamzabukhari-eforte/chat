@@ -14,6 +14,10 @@ import {
   stripSesPlaceholderCaption,
 } from "../lib/chat/sesMedia";
 import {
+  normalizeLoadConversationApiMessageText,
+  normalizeSesWireMessageText,
+} from "../lib/chat/sesWireText";
+import {
   binaryChunkCountForFileSize,
   FILE_CHUNK_SIZE_BYTES,
 } from "../lib/chat/fileChunks";
@@ -374,7 +378,7 @@ function mapApiRowToMessage(
       ? attachmentsFromSesFields(fields, attachmentIdPrefix)
       : undefined;
   const displayText = stripSesPlaceholderCaption(
-    text,
+    normalizeLoadConversationApiMessageText(text),
     Boolean(attachments?.length),
   );
 
@@ -928,7 +932,10 @@ export function useWebSocketChat(currentUser: User | null) {
              * `hasAttachments: true` so "." / placeholders align.
              */
             const captionKey = (msg: Message) =>
-              stripSesPlaceholderCaption(msg.text, true).trim();
+              stripSesPlaceholderCaption(
+                normalizeSesWireMessageText(msg.text),
+                true,
+              ).trim();
 
             const incomingCaption = captionKey(incoming);
 
@@ -971,6 +978,7 @@ export function useWebSocketChat(currentUser: User | null) {
 
             /** SES often echoes a wall-clock string that does not match send time; keep client send instant. */
             const opt = optimisticMatches[0];
+            const optHasCaption = opt != null && opt.text.trim() !== "";
             const echoWithClientTime: Message =
               opt != null
                 ? {
@@ -978,6 +986,7 @@ export function useWebSocketChat(currentUser: User | null) {
                     createdAt: opt.createdAt,
                     messageTime:
                       opt.messageTime ?? mergedIncoming.messageTime,
+                    text: optHasCaption ? opt.text : mergedIncoming.text,
                   }
                 : mergedIncoming;
 
