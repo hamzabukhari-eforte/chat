@@ -36,15 +36,21 @@ const WS_FILE_WAIT_ACK_AFTER_METADATA =
  */
 const WS_FILE_WAIT_ACK_AFTER_EACH_CHUNK = false;
 
-const DEFAULT_QUEUE_CHATS_URL =
-  "http://10.0.10.53:8080/SES/SocialMedia/whatsapp/getQueueNAssignedChats";
-
-const DEFAULT_LOAD_CONVERSATION_URL =
-  "http://10.0.10.53:8080/SES/SocialMedia/whatsapp/loadConversationById";
-const DEFAULT_ASSIGN_CHAT_URL =
-  "http://10.0.10.53:8080/SES/SocialMedia/whatsapp/assignChat";
+const DEFAULT_HTTP_API_ORIGIN = "http://10.0.10.53:8080";
+const DEFAULT_QUEUE_CHATS_PATH =
+  "/SES/SocialMedia/whatsapp/getQueueNAssignedChats";
+const DEFAULT_LOAD_CONVERSATION_PATH =
+  "/SES/SocialMedia/whatsapp/loadConversationById";
+const DEFAULT_ASSIGN_CHAT_PATH = "/SES/SocialMedia/whatsapp/assignChat";
 const DEFAULT_CHAT_WS_HOST = "10.0.10.53:8080";
 const DEFAULT_CHAT_WS_PATH = "/SES/WebLiveChat";
+
+function getDefaultApiOrigin(): string {
+  if (typeof window === "undefined") return DEFAULT_HTTP_API_ORIGIN;
+  return window.location.protocol === "https:"
+    ? window.location.origin
+    : DEFAULT_HTTP_API_ORIGIN;
+}
 
 function getChatWebSocketUrl(): string {
   const fromEnv =
@@ -56,8 +62,11 @@ function getChatWebSocketUrl(): string {
     return `ws://${DEFAULT_CHAT_WS_HOST}${DEFAULT_CHAT_WS_PATH}`;
   }
   const isHttps = window.location.protocol === "https:";
-  const protocol = isHttps ? "wss:" : "ws:";
-  return `${protocol}//${DEFAULT_CHAT_WS_HOST}${DEFAULT_CHAT_WS_PATH}`;
+  if (isHttps) {
+    const domain = window.location.hostname;
+    return `wss://${domain}${DEFAULT_CHAT_WS_PATH}`;
+  }
+  return `ws://${DEFAULT_CHAT_WS_HOST}${DEFAULT_CHAT_WS_PATH}`;
 }
 
 function getLoadConversationUrl(): string {
@@ -66,7 +75,9 @@ function getLoadConversationUrl(): string {
     process.env.NEXT_PUBLIC_LOAD_CONVERSATION_URL
       ? process.env.NEXT_PUBLIC_LOAD_CONVERSATION_URL
       : undefined;
-  return (fromEnv ?? DEFAULT_LOAD_CONVERSATION_URL).replace(/\/$/, "");
+  return (
+    fromEnv ?? `${getDefaultApiOrigin()}${DEFAULT_LOAD_CONVERSATION_PATH}`
+  ).replace(/\/$/, "");
 }
 
 function getQueueChatsUrl(): string {
@@ -74,7 +85,9 @@ function getQueueChatsUrl(): string {
     typeof process !== "undefined" && process.env.NEXT_PUBLIC_QUEUE_CHATS_URL
       ? process.env.NEXT_PUBLIC_QUEUE_CHATS_URL
       : undefined;
-  return (fromEnv ?? DEFAULT_QUEUE_CHATS_URL).replace(/\/$/, "");
+  return (
+    fromEnv ?? `${getDefaultApiOrigin()}${DEFAULT_QUEUE_CHATS_PATH}`
+  ).replace(/\/$/, "");
 }
 
 function shouldSendUserIdInParams(): boolean {
@@ -92,7 +105,10 @@ function getAssignChatUrl(): string {
     typeof process !== "undefined" && process.env.NEXT_PUBLIC_ASSIGN_CHAT_URL
       ? process.env.NEXT_PUBLIC_ASSIGN_CHAT_URL
       : undefined;
-  return (fromEnv ?? DEFAULT_ASSIGN_CHAT_URL).replace(/\/$/, "");
+  return (fromEnv ?? `${getDefaultApiOrigin()}${DEFAULT_ASSIGN_CHAT_PATH}`).replace(
+    /\/$/,
+    "",
+  );
 }
 
 interface QueueNAssignedRow {

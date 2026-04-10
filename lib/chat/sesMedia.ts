@@ -240,22 +240,8 @@ export function attachmentsFromSesFields(
     /\.[a-z0-9]{2,12}$/i.test(message) &&
     !/\s/.test(message);
 
-  /**
-   * Type `1` = text — ignore stray `filePath` / `fileName` / status noise.
-   * Some APIs still send `messageType: 1` with a real `fileUrl` or `fileName.jpg`; keep those.
-   */
-  const apiPathSuggestsMedia =
-    Boolean(normalizedApiPath) &&
-    (isSesStoragePath(normalizedApiPath) ||
-      hasLikelyFileExtension(apiFilenamePath));
-
-  const strongMediaEvidenceForType1 =
-    Boolean(explicitUrl) ||
-    (Boolean(fileName) && hasLikelyFileExtension(fileName)) ||
-    apiPathSuggestsMedia ||
-    messageLooksLikeFilename;
-
-  if (Number.isFinite(msgType) && msgType === 1 && !strongMediaEvidenceForType1) {
+  /** Type `1` is always text-only for SES/socket flows. */
+  if (Number.isFinite(msgType) && msgType === 1) {
     return undefined;
   }
 
