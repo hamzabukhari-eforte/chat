@@ -47,6 +47,7 @@ const DEFAULT_QUEUE_CHATS_PATH =
 const DEFAULT_LOAD_CONVERSATION_PATH =
   "/SES/SocialMedia/whatsapp/loadConversationById";
 const DEFAULT_ASSIGN_CHAT_PATH = "/SES/SocialMedia/whatsapp/assignChat";
+const DEFAULT_CLOSE_CHAT_PATH = "/SES/SocialMedia/whatsapp/closeChat";
 const DEFAULT_CHAT_WS_HOST = "10.0.10.53:8080";
 const DEFAULT_CHAT_WS_PATH = "/SES/WebLiveChat";
 
@@ -114,6 +115,16 @@ function getAssignChatUrl(): string {
     /\/$/,
     "",
   );
+}
+
+function getCloseChatUrl(): string {
+  const fromEnv =
+    typeof process !== "undefined" && process.env.NEXT_PUBLIC_CLOSE_CHAT_URL
+      ? process.env.NEXT_PUBLIC_CLOSE_CHAT_URL
+      : undefined;
+  return (
+    fromEnv ?? `${getDefaultApiOrigin()}${DEFAULT_CLOSE_CHAT_PATH}`
+  ).replace(/\/$/, "");
 }
 
 interface QueueNAssignedRow {
@@ -561,6 +572,32 @@ async function assignChatToAgent(
   });
   if (!res.ok) {
     throw new Error(`assignChat failed: ${res.status}`);
+  }
+  const json: unknown = await res.json();
+  return parseAssignStatus(json);
+}
+
+async function closeWhatsAppChat(
+  chatIndex: string | number,
+  domainIndex: number,
+  chatFrom: number,
+  userId: string,
+): Promise<number | null> {
+  const url = new URL(getCloseChatUrl());
+  if (shouldSendUserIdInParams()) {
+    url.searchParams.set("Userid", userId);
+  }
+  const res = await fetch(url.toString(), {
+    method: "POST",
+    credentials: getApiFetchCredentials(),
+    body: JSON.stringify({
+      chatIndex,
+      domainIndex,
+      chatFrom,
+    }),
+  });
+  if (!res.ok) {
+    throw new Error(`closeChat failed: ${res.status}`);
   }
   const json: unknown = await res.json();
   return parseAssignStatus(json);
@@ -1468,9 +1505,61 @@ export function useWebSocketChat(currentUser: User | null) {
 
   const resolveChat = () => {
     if (!currentUser || !state.activeChatId) return;
+    const chatId = state.activeChatId;
+    const chat = state.chats.find((c) => c.id === chatId);
+
+    if (
+      currentUser.role === "agent" &&
+      chat &&
+      state.domainIndex !== null &&
+      state.chatFrom !== null
+    ) {
+      const domainIndex = state.domainIndex;
+      const chatFrom = state.chatFrom;
+      const chatIndex = getChatIndexForApi(chat);
+      if (chatIndex === null || String(chatIndex).trim() === "") {
+        toast.error("Unable to close this chat right now.");
+        return;
+      }
+      void (async () => {
+        try {
+          const status = await closeWhatsAppChat(
+            chatIndex,
+            domainIndex,
+            chatFrom,
+            currentUser.id,
+          );
+          if (status === 1) {
+            toast.success("Chat has been closed.");
+            setState((prev) => ({
+              ...prev,
+              chats: prev.chats.filter((c) => c.id !== chatId),
+              activeChatId: prev.activeChatId === chatId ? null : prev.activeChatId,
+              messages: prev.messages.filter((m) => m.chatId !== chatId),
+            }));
+            return;
+          }
+          if (status === 2) {
+            toast.info("This chat is already closed.");
+            setState((prev) => ({
+              ...prev,
+              chats: prev.chats.filter((c) => c.id !== chatId),
+              activeChatId: prev.activeChatId === chatId ? null : prev.activeChatId,
+              messages: prev.messages.filter((m) => m.chatId !== chatId),
+            }));
+            return;
+          }
+          toast.error("Unable to close this chat right now.");
+        } catch {
+          toast.error("Unable to close this chat right now.");
+        }
+      })();
+      return;
+    }
+
     client.send({
       type: "resolve-chat",
-      payload: { chatId: state.activeChatId, agent: currentUser },
+      payload: { chatId, agent: currentUser },
     });
     setState((prev) => ({ ...prev, activeChatId: null }));
   };
