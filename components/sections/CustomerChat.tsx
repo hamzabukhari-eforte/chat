@@ -12,13 +12,12 @@ import {
 import { FiFile, FiMic, FiPaperclip, FiSend, FiSmile, FiX } from "react-icons/fi";
 import data from "@emoji-mart/data";
 import Picker from "@emoji-mart/react";
-import { useAuth } from "../../hooks/useAuth";
 import { useWebSocketChat } from "../../hooks/useWebSocketChat";
 import { toast } from "sonner";
 import { attachmentShouldRenderAsVideo } from "../../lib/chat/attachmentDisplay";
 import { stableMessageListKey } from "../../lib/chat/messageKey";
 import { formatMessageTimeLabelFromMessage } from "../../lib/chat/sesMessageTime";
-import type { Attachment, Message } from "../../lib/chat/types";
+import type { Attachment, Message, User } from "../../lib/chat/types";
 import { ChatAudioRecorder } from "../atoms/ChatAudioRecorder";
 import { ChatVideoPlayer } from "../atoms/ChatVideoPlayer";
 import {
@@ -43,25 +42,65 @@ function formatFileSize(bytes: number): string {
   return (bytes / (1024 * 1024)).toFixed(1) + " MB";
 }
 
+function fileBaseName(fullName: string): string {
+  const n = (fullName || "").trim();
+  if (!n) return "";
+  const parts = n.split(/[\\/]/);
+  return parts[parts.length - 1] || n;
+}
+
+function revokeBlobPreviewUrl(url: string | undefined) {
+  if (url?.startsWith("blob:")) URL.revokeObjectURL(url);
+}
+
 function MessageAttachments({ message }: { message: Message }) {
   if (!message.attachments?.length) return null;
+
+  const downloadAttachment = (att: Attachment) => {
+    if (!att.url) return;
+    const link = document.createElement("a");
+    link.href = att.url;
+    link.download = fileBaseName(att.name) || "download";
+    link.rel = "noopener noreferrer";
+    link.target = "_blank";
+    document.body.appendChild(link);
+    link.click();
+    link.remove();
+  };
 
   return (
     <div className="flex flex-wrap gap-2 mb-1">
       {message.attachments.map((att) => (
         <div key={att.id} className="shrink-0">
           {attachmentShouldRenderAsVideo(att) && att.url ? (
-            <ChatVideoPlayer url={att.url} maxWidth={280} />
+            <div className="flex flex-col gap-1">
+              <ChatVideoPlayer url={att.url} maxWidth={280} />
+              <a
+                href={att.url}
+                download={fileBaseName(att.name) || "video"}
+                target="_blank"
+                rel="noopener noreferrer"
+                className="text-xs font-medium text-brand-600 hover:underline cursor-pointer"
+              >
+                Download
+              </a>
+            </div>
           ) : att.type === "image" && att.url ? (
-            <div className="relative w-[200px] h-[150px]">
+            <a
+              href={att.url}
+              target="_blank"
+              rel="noopener noreferrer"
+              download={fileBaseName(att.name) || "image"}
+              className="relative block h-[150px] w-[200px] cursor-pointer overflow-hidden rounded-lg hover:opacity-90 transition-opacity"
+            >
               <Image
                 src={att.url}
                 alt={att.name}
                 fill
                 unoptimized
-                className="rounded-lg object-cover"
+                className="object-cover"
               />
-            </div>
+            </a>
           ) : att.type === "audio" && att.url ? (
             <audio
               src={att.url}
@@ -70,14 +109,15 @@ function MessageAttachments({ message }: { message: Message }) {
               preload="metadata"
             />
           ) : (
-            <div
-              className={
-                "flex items-center gap-2 px-3 py-2 rounded-lg text-sm bg-gray-200 text-gray-700"
-              }
+            <button
+              type="button"
+              onClick={() => downloadAttachment(att)}
+              disabled={!att.url}
+              className="flex cursor-pointer items-center gap-2 rounded-lg bg-gray-200 px-3 py-2 text-sm text-gray-700 transition-colors hover:bg-gray-300 disabled:cursor-not-allowed disabled:opacity-60"
             >
-              <FiFile className="w-4 h-4 shrink-0 text-gray-700" />
-              <span className="truncate max-w-[150px]">{att.name}</span>
-            </div>
+              <FiFile className="h-4 w-4 shrink-0 text-gray-700" />
+              <span className="max-w-[150px] truncate">{att.name}</span>
+            </button>
           )}
         </div>
       ))}
@@ -85,17 +125,17 @@ function MessageAttachments({ message }: { message: Message }) {
   );
 }
 
+function createAnonymousCustomer(): User {
+  return {
+    id: typeof crypto !== "undefined" ? crypto.randomUUID() : `customer-${Date.now()}`,
+    name: "Customer",
+    role: "customer",
+  };
+}
+
 export function CustomerChat() {
-  const { user } = useAuth();
-  const chat = useWebSocketChat(
-    user
-      ? {
-          id: user.id,
-          name: user.name,
-          role: user.role,
-        }
-      : null,
-  );
+  const [customer] = useState<User>(createAnonymousCustomer);
+  const chat = useWebSocketChat(customer);
 
   const [draft, setDraft] = useState("");
   const [showEmojiPicker, setShowEmojiPicker] = useState(false);
@@ -139,13 +179,22 @@ export function CustomerChat() {
     for (const file of Array.from(files)) {
       const isImage = file.type.startsWith("image/");
       const isVideo = isVideoFile(file);
+      const isAudio = file.type.startsWith("audio/");
       const preview: FilePreview = {
         id: Math.random().toString(36).substring(7),
         file,
-        type: isImage ? "image" : isVideo ? "video" : "document",
+        type: isImage
+          ? "image"
+          : isVideo
+            ? "video"
+            : isAudio
+              ? "audio"
+              : "document",
       };
       if (isImage || isVideo) {
         preview.previewUrl = await fileToBase64(file);
+      } else {
+        preview.previewUrl = URL.createObjectURL(file);
       }
       newPreviews.push(preview);
     }
@@ -154,7 +203,11 @@ export function CustomerChat() {
   };
 
   const removeFilePreview = (id: string) => {
-    setFilePreviews((prev) => prev.filter((p) => p.id !== id));
+    setFilePreviews((prev) => {
+      const fp = prev.find((p) => p.id === id);
+      revokeBlobPreviewUrl(fp?.previewUrl);
+      return prev.filter((p) => p.id !== id);
+    });
   };
 
   const blobToDataUrl = (blob: Blob): Promise<string> =>
@@ -232,7 +285,7 @@ export function CustomerChat() {
       >
         {chat.activeChat &&
           chat.activeMessages.map((message) => {
-            const isMine = message.senderId === user?.id;
+            const isMine = message.senderId === customer.id;
             return (
               <div
                 key={stableMessageListKey(message)}

@@ -4,6 +4,7 @@ import {
   splitSesMessageHeader,
   tryFormatMessageTimeForSesWire,
 } from "../chat/sesMessageTime";
+import { parseSesSeenStatusFromFields } from "../chat/sesChatSeenStatus";
 import {
   attachmentsFromSesFields,
   stripSesPlaceholderCaption,
@@ -119,37 +120,11 @@ function parseSesChatSeenStatus(
   md: Record<string, unknown> | null,
   data: Record<string, unknown> | null,
 ): 3 | 4 | null {
-  const read = (src: Record<string, unknown> | null | undefined): unknown => {
-    if (!src) return undefined;
-    return (
-      src.status ??
-      src.Status ??
-      src.chatSeenStatus ??
-      src.ChatSeenStatus ??
-      src.seenStatus ??
-      src.SeenStatus ??
-      src.chat_seen_status
-    );
-  };
-  const raw = read(root) ?? read(md) ?? read(data);
-  if (raw === undefined || raw === null) return null;
-  if (raw === true || raw === "true" || raw === "TRUE") return 4;
-  if (raw === false || raw === "false" || raw === "FALSE") return 3;
-  if (typeof raw === "string") {
-    const s = raw.trim().toLowerCase();
-    if (s === "seen" || s === "read" || s === "blue") return 4;
-    if (s === "delivered" || s === "sent") return 3;
-  }
-  const n =
-    typeof raw === "number" && Number.isFinite(raw)
-      ? raw
-      : Number(String(raw).trim());
-  if (Number.isNaN(n)) return null;
-  if (n === 3 || n === 4) return n;
-  /** Some gateways use 1/2 instead of 3/4. */
-  if (n === 1) return 3;
-  if (n === 2) return 4;
-  return null;
+  return (
+    parseSesSeenStatusFromFields(root) ??
+    parseSesSeenStatusFromFields(md) ??
+    parseSesSeenStatusFromFields(data)
+  );
 }
 
 /** SES read/delivery receipt: `CHAT_SEEN` with same id fields as `NEW_MESSAGE`. */

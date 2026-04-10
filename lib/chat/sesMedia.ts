@@ -382,33 +382,54 @@ function urlPathBasename(url: string): string {
 }
 
 /**
+ * SES often stores files as `YYYYMMDDHHmmss_<numericId>_<original.ext>` for uniqueness.
+ * Strip that prefix for UI labels when the remainder looks like a real filename.
+ */
+function stripSesSyntheticFilenamePrefix(name: string): string {
+  const s = name.trim();
+  if (!s) return s;
+  const m = /^(\d{14})_([^_]+)_(.+)$/i.exec(s);
+  if (!m) return s;
+  const rest = m[3].trim();
+  if (
+    rest &&
+    hasLikelyFileExtension(rest) &&
+    looksLikePlausibleFileBasename(rest)
+  ) {
+    return rest;
+  }
+  return s;
+}
+
+/**
  * Socket/API often set `fileName` to msg id (`478`) or `123.png` while the real name is only in the URL path.
  */
 function resolveAttachmentDisplayName(preferredName: string, url: string): string {
   const n = preferredName.trim();
   const base = urlPathBasename(url);
   const hasExt = (s: string) => /\.[a-z0-9]{2,12}$/i.test(s);
+  let out: string;
   if (!hasExt(base)) {
-    return pickFilenameHintForAttachment(n, url);
+    out = pickFilenameHintForAttachment(n, url);
+  } else {
+    const stem = (s: string) => s.replace(/\.[a-z0-9]+$/i, "");
+    const baseStem = stem(base);
+    const nameStem = stem(n);
+
+    const baseHasLetters = /[a-z]/i.test(baseStem);
+    const nameIsBareId = !n || /^\d{1,16}$/.test(n);
+    const nameIsDigitsPlusExt =
+      hasExt(n) && nameStem.length > 0 && /^\d+$/.test(nameStem);
+
+    if (baseHasLetters && (nameIsBareId || nameIsDigitsPlusExt)) {
+      out = base;
+    } else if (nameIsBareId && hasExt(base)) {
+      out = base;
+    } else {
+      out = pickFilenameHintForAttachment(n, url);
+    }
   }
-
-  const stem = (s: string) => s.replace(/\.[a-z0-9]+$/i, "");
-  const baseStem = stem(base);
-  const nameStem = stem(n);
-
-  const baseHasLetters = /[a-z]/i.test(baseStem);
-  const nameIsBareId = !n || /^\d{1,16}$/.test(n);
-  const nameIsDigitsPlusExt =
-    hasExt(n) && nameStem.length > 0 && /^\d+$/.test(nameStem);
-
-  if (baseHasLetters && (nameIsBareId || nameIsDigitsPlusExt)) {
-    return base;
-  }
-  if (nameIsBareId && hasExt(base)) {
-    return base;
-  }
-
-  return pickFilenameHintForAttachment(n, url);
+  return stripSesSyntheticFilenamePrefix(out);
 }
 
 function inferAttachment(

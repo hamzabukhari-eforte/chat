@@ -8,6 +8,7 @@ import {
   formatSesLocalMessageTime,
   splitSesMessageHeader,
 } from "../lib/chat/sesMessageTime";
+import { parseSesSeenStatusFromFields } from "../lib/chat/sesChatSeenStatus";
 import {
   attachmentsFromSesFields,
   stripSesPlaceholderCaption,
@@ -377,6 +378,8 @@ function mapApiRowToMessage(
     Boolean(attachments?.length),
   );
 
+  const chatSeenStatus = parseSesSeenStatusFromFields(fields);
+
   return {
     ...(id ? { id } : {}),
     chatId,
@@ -387,6 +390,7 @@ function mapApiRowToMessage(
     ...(messageTime ? { messageTime } : {}),
     ...(messageHeader ? { messageHeader } : {}),
     ...(attachments?.length ? { attachments } : {}),
+    ...(chatSeenStatus !== null ? { chatSeenStatus } : {}),
   };
 }
 
@@ -1379,21 +1383,6 @@ export function useWebSocketChat(currentUser: User | null) {
             : c,
         ),
       }));
-
-      client.sendRaw({
-        chatroomId: state.activeChatId.toString(),
-        userId: currentUser.id.toString(),
-        // Avoid duplicate text rows: caption is sent on EndOfFile for file messages.
-        message: "",
-        type: "Message",
-        messagefrom: "1",
-        messageType: "2",
-        Agentid: currentUser.id.toString(),
-        messageTime,
-        msgtime: messageTime,
-        ...(state.domainIndex !== null ? { domainIndex: state.domainIndex } : {}),
-        ...(state.chatFrom !== null ? { chatFrom: state.chatFrom } : {}),
-      });
 
       try {
         await sendFileChunksViaWebSocket(client, fileList, {

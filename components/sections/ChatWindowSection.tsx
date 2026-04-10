@@ -83,6 +83,10 @@ function formatFileSize(bytes: number): string {
   return (bytes / (1024 * 1024)).toFixed(1) + " MB";
 }
 
+function revokeBlobPreviewUrl(url: string | undefined) {
+  if (url?.startsWith("blob:")) URL.revokeObjectURL(url);
+}
+
 function getFileBaseName(fullName: string): string {
   const n = (fullName || "").trim();
   if (!n) return "";
@@ -178,14 +182,23 @@ export function ChatWindowSection({
     for (const file of Array.from(files)) {
       const isImage = file.type.startsWith("image/");
       const isVideo = isVideoFile(file);
+      const isAudio = file.type.startsWith("audio/");
       const preview: FilePreview = {
         id: Math.random().toString(36).substring(7),
         file,
-        type: isImage ? "image" : isVideo ? "video" : "document",
+        type: isImage
+          ? "image"
+          : isVideo
+            ? "video"
+            : isAudio
+              ? "audio"
+              : "document",
       };
 
       if (isImage || isVideo) {
         preview.previewUrl = await fileToBase64(file);
+      } else {
+        preview.previewUrl = URL.createObjectURL(file);
       }
 
       newPreviews.push(preview);
@@ -199,7 +212,11 @@ export function ChatWindowSection({
   };
 
   const removeFilePreview = (id: string) => {
-    setFilePreviews((prev) => prev.filter((p) => p.id !== id));
+    setFilePreviews((prev) => {
+      const fp = prev.find((p) => p.id === id);
+      revokeBlobPreviewUrl(fp?.previewUrl);
+      return prev.filter((p) => p.id !== id);
+    });
   };
 
   const blobToDataUrl = (blob: Blob): Promise<string> =>
@@ -242,6 +259,7 @@ export function ChatWindowSection({
     link.href = att.url;
     link.download = att.name || "download";
     link.rel = "noopener noreferrer";
+    link.target = "_blank";
     document.body.appendChild(link);
     link.click();
     link.remove();
@@ -383,7 +401,18 @@ export function ChatWindowSection({
                         {message.attachments.map((att) => (
                           <div key={att.id} className="relative shrink-0">
                             {attachmentShouldRenderAsVideo(att) && att.url ? (
-                              <ChatVideoPlayer url={att.url} maxWidth={280} />
+                              <div className="flex flex-col items-end gap-1">
+                                <ChatVideoPlayer url={att.url} maxWidth={280} />
+                                <a
+                                  href={att.url}
+                                  download={getFileBaseName(att.name) || "video"}
+                                  target="_blank"
+                                  rel="noopener noreferrer"
+                                  className="text-xs font-medium text-brand-600 hover:underline cursor-pointer"
+                                >
+                                  Download
+                                </a>
+                              </div>
                             ) : att.type === "image" && att.url ? (
                               <button
                                 type="button"
@@ -476,7 +505,18 @@ export function ChatWindowSection({
                         {message.attachments.map((att) => (
                           <div key={att.id} className="relative shrink-0">
                             {attachmentShouldRenderAsVideo(att) && att.url ? (
-                              <ChatVideoPlayer url={att.url} maxWidth={280} />
+                              <div className="flex flex-col items-start gap-1">
+                                <ChatVideoPlayer url={att.url} maxWidth={280} />
+                                <a
+                                  href={att.url}
+                                  download={getFileBaseName(att.name) || "video"}
+                                  target="_blank"
+                                  rel="noopener noreferrer"
+                                  className="text-xs font-medium text-brand-600 hover:underline cursor-pointer"
+                                >
+                                  Download
+                                </a>
+                              </div>
                             ) : att.type === "image" && att.url ? (
                               <button
                                 type="button"
