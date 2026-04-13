@@ -17,6 +17,7 @@ import {
   FaFileCsv,
   FaFileAlt,
 } from "react-icons/fa";
+import { ExpandableMessageText } from "../atoms/ExpandableMessageText";
 import { AvatarWithInitials } from "../atoms/AvatarWithInitials";
 import { MessageSeenTicks } from "../atoms/MessageSeenTicks";
 import { ChatAudioRecorder } from "../atoms/ChatAudioRecorder";
@@ -36,6 +37,7 @@ import {
   messageGroupKeyFromHeader,
 } from "../../lib/chat/sesMessageTime";
 import { toast } from "sonner";
+import { useAutoGrowTextarea } from "../../hooks/useAutoGrowTextarea";
 import type { Attachment, Chat, Message } from "../../lib/chat/types";
 
 interface Props {
@@ -141,6 +143,7 @@ export function ChatWindowSection({
   const fileInputRef = useRef<HTMLInputElement>(null);
   const emojiPickerRef = useRef<HTMLDivElement>(null);
   const messagesScrollRef = useRef<HTMLDivElement>(null);
+  const draftTextareaRef = useAutoGrowTextarea(draft);
 
   const messagesTailKey = useMemo(() => {
     if (!messages.length) return "";
@@ -232,7 +235,7 @@ export function ChatWindowSection({
     const id = Math.random().toString(36).slice(2);
     const name = voiceClipFileNameForBlob(blob);
     const file = new File([blob], name, {
-      type: blob.type || "audio/webm",
+      type: blob.type || "audio/ogg",
     });
     setFilePreviews((prev) => [
       ...prev,
@@ -436,12 +439,14 @@ export function ChatWindowSection({
                                 </div>
                               </button>
                             ) : att.type === "audio" && att.url ? (
-                              <audio
-                                src={att.url}
-                                controls
-                                className="max-w-[220px] rounded-lg"
-                                preload="metadata"
-                              />
+                              <div className="rounded-lg bg-gray-50 p-1.5 [color-scheme:light]">
+                                <audio
+                                  src={att.url}
+                                  controls
+                                  className="max-w-[220px] rounded-md"
+                                  preload="metadata"
+                                />
+                              </div>
                             ) : (
                               <button
                                 type="button"
@@ -475,10 +480,11 @@ export function ChatWindowSection({
                       </div>
                     )}
                     {(message.text?.length ?? 0) > 0 && (
-                      <div className="bg-brand-500 text-white rounded-2xl rounded-tr-sm px-4 py-2.5 inline-block max-w-md">
-                        <p className="text-sm whitespace-pre-wrap break-words">
-                          {message.text}
-                        </p>
+                      <div className="bg-brand-500 text-white rounded-2xl rounded-tr-sm px-4 py-2.5 inline-block max-w-[60vw]">
+                        <ExpandableMessageText
+                          text={message.text!}
+                          tone="inverse"
+                        />
                       </div>
                     )}
                     <div className="flex items-center justify-end gap-1 mt-1">
@@ -542,12 +548,14 @@ export function ChatWindowSection({
                                 </div>
                               </button>
                             ) : att.type === "audio" && att.url ? (
-                              <audio
-                                src={att.url}
-                                controls
-                                className="max-w-[220px] rounded-lg"
-                                preload="metadata"
-                              />
+                              <div className="rounded-lg bg-gray-50 p-1.5 [color-scheme:light]">
+                                <audio
+                                  src={att.url}
+                                  controls
+                                  className="max-w-[220px] rounded-md"
+                                  preload="metadata"
+                                />
+                              </div>
                             ) : (
                               <button
                                 type="button"
@@ -581,10 +589,8 @@ export function ChatWindowSection({
                       </div>
                     )}
                     {(message.text?.length ?? 0) > 0 && (
-                      <div className="bg-gray-100 rounded-2xl rounded-tl-sm px-4 py-2.5 inline-block max-w-md">
-                        <p className="text-sm text-gray-800 whitespace-pre-wrap break-words">
-                          {message.text}
-                        </p>
+                      <div className="bg-gray-100 rounded-2xl rounded-tl-sm px-4 py-2.5 inline-block max-w-[60vw] text-gray-800">
+                        <ExpandableMessageText text={message.text!} />
                       </div>
                     )}
                     <span className="text-xs text-gray-400 mt-1 block">
@@ -652,12 +658,14 @@ export function ChatWindowSection({
                     <div className="w-12 h-12 rounded bg-gray-100 flex items-center justify-center">
                       <FiMic className="w-5 h-5 text-brand-600" />
                     </div>
-                    <audio
-                      src={fp.previewUrl}
-                      controls
-                      className="h-8 w-[120px] max-w-[120px]"
-                      preload="metadata"
-                    />
+                    <div className="rounded-md bg-gray-50 p-1 [color-scheme:light]">
+                      <audio
+                        src={fp.previewUrl}
+                        controls
+                        className="h-8 w-[120px] max-w-[120px]"
+                        preload="metadata"
+                      />
+                    </div>
                   </div>
                 ) : fp.type === "image" && fp.previewUrl ? (
                   <Image
@@ -726,6 +734,7 @@ export function ChatWindowSection({
 
               {/* Text Input */}
               <textarea
+                ref={draftTextareaRef}
                 rows={1}
                 placeholder="Type your message..."
                 value={draft}
@@ -737,7 +746,7 @@ export function ChatWindowSection({
                     handleSubmit(e);
                   }
                 }}
-                className="flex-1 min-w-0 bg-transparent border-none focus:ring-0 py-3 text-sm resize-none max-h-32 min-h-[44px] outline-none text-gray-700"
+                className="flex-1 min-w-0 bg-transparent border-none focus:ring-0 py-3 text-sm resize-none max-h-[150px] min-h-[44px] outline-none text-gray-700"
               />
 
               <ChatAudioRecorder

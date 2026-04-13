@@ -18,14 +18,14 @@ function pickMimeType(): string {
     return "";
   }
   const candidates = [
+    "audio/ogg;codecs=opus",
+    "audio/ogg",
     "audio/webm;codecs=opus",
     "audio/webm",
     "audio/mp4",
     "audio/mp4;codecs=mp4a.40.2",
     "audio/aac",
     "video/mp4",
-    "audio/ogg;codecs=opus",
-    "audio/ogg",
   ];
   for (const t of candidates) {
     if (MediaRecorder.isTypeSupported(t)) {
@@ -57,7 +57,7 @@ export function ChatAudioRecorderInner({
   const mediaRecorderRef = useRef<MediaRecorder | null>(null);
   const streamRef = useRef<MediaStream | null>(null);
   const chunksRef = useRef<Blob[]>([]);
-  const mimeTypeRef = useRef<string>("audio/webm");
+  const mimeTypeRef = useRef<string>("audio/ogg");
   const timerIntervalRef = useRef<ReturnType<typeof setInterval> | null>(null);
   const skipReviewRef = useRef(false);
 
@@ -140,7 +140,7 @@ export function ChatAudioRecorderInner({
       chunksRef.current = [];
 
       const mime = pickMimeType();
-      mimeTypeRef.current = mime || "audio/webm";
+      mimeTypeRef.current = mime || "audio/ogg";
 
       let recorder: MediaRecorder;
       try {
@@ -150,9 +150,12 @@ export function ChatAudioRecorderInner({
         );
       } catch {
         recorder = new MediaRecorder(stream);
-        mimeTypeRef.current = recorder.mimeType || "audio/webm";
+        mimeTypeRef.current = recorder.mimeType || "audio/ogg";
       }
       mediaRecorderRef.current = recorder;
+      if (recorder.mimeType) {
+        mimeTypeRef.current = recorder.mimeType;
+      }
 
       recorder.ondataavailable = (e) => {
         if (e.data.size > 0) chunksRef.current.push(e.data);
@@ -170,7 +173,7 @@ export function ChatAudioRecorderInner({
         }
 
         const blob = new Blob(chunksRef.current, {
-          type: mimeTypeRef.current || "audio/webm",
+          type: mimeTypeRef.current || "audio/ogg",
         });
         chunksRef.current = [];
         const url = URL.createObjectURL(blob);
@@ -290,12 +293,14 @@ export function ChatAudioRecorderInner({
 
           {phase === "review" && reviewUrl && (
             <div className="flex flex-col gap-3">
-              <audio
-                src={reviewUrl}
-                controls
-                className="w-full max-w-full rounded-md"
-                preload="metadata"
-              />
+              <div className="rounded-md bg-gray-50 p-1.5 [color-scheme:light]">
+                <audio
+                  src={reviewUrl}
+                  controls
+                  className="w-full max-w-full rounded-md"
+                  preload="metadata"
+                />
+              </div>
               <div className="flex gap-2">
                 <button
                   type="button"

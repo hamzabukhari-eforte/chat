@@ -12,12 +12,14 @@ import {
 import { FiFile, FiMic, FiPaperclip, FiSend, FiSmile, FiX } from "react-icons/fi";
 import data from "@emoji-mart/data";
 import Picker from "@emoji-mart/react";
+import { useAutoGrowTextarea } from "../../hooks/useAutoGrowTextarea";
 import { useWebSocketChat } from "../../hooks/useWebSocketChat";
 import { toast } from "sonner";
 import { attachmentShouldRenderAsVideo } from "../../lib/chat/attachmentDisplay";
 import { stableMessageListKey } from "../../lib/chat/messageKey";
 import { formatMessageTimeLabelFromMessage } from "../../lib/chat/sesMessageTime";
 import type { Attachment, Message, User } from "../../lib/chat/types";
+import { ExpandableMessageText } from "../atoms/ExpandableMessageText";
 import { ChatAudioRecorder } from "../atoms/ChatAudioRecorder";
 import { ChatVideoPlayer } from "../atoms/ChatVideoPlayer";
 import {
@@ -102,12 +104,14 @@ function MessageAttachments({ message }: { message: Message }) {
               />
             </a>
           ) : att.type === "audio" && att.url ? (
-            <audio
-              src={att.url}
-              controls
-              className="max-w-[220px] rounded-lg"
-              preload="metadata"
-            />
+            <div className="rounded-lg bg-gray-50 p-1.5 [color-scheme:light]">
+              <audio
+                src={att.url}
+                controls
+                className="max-w-[220px] rounded-md"
+                preload="metadata"
+              />
+            </div>
           ) : (
             <button
               type="button"
@@ -143,6 +147,7 @@ export function CustomerChat() {
   const fileInputRef = useRef<HTMLInputElement>(null);
   const emojiPickerRef = useRef<HTMLDivElement>(null);
   const messagesScrollRef = useRef<HTMLDivElement>(null);
+  const draftTextareaRef = useAutoGrowTextarea(draft);
 
   const messagesTailKey = useMemo(() => {
     const list = chat.activeMessages;
@@ -223,7 +228,7 @@ export function CustomerChat() {
     const id = Math.random().toString(36).slice(2);
     const name = voiceClipFileNameForBlob(blob);
     const file = new File([blob], name, {
-      type: blob.type || "audio/webm",
+      type: blob.type || "audio/ogg",
     });
     setFilePreviews((prev) => [
       ...prev,
@@ -301,13 +306,16 @@ export function CustomerChat() {
                   {message.text ? (
                     <div
                       className={
-                        "px-4 py-2.5 rounded-2xl shadow-sm text-sm " +
+                        "px-4 py-2.5 rounded-2xl shadow-sm text-sm min-w-0 max-w-[60vw] " +
                         (isMine
                           ? "bg-brand-600 text-white"
                           : "bg-white border border-gray-100 text-gray-800")
                       }
                     >
-                      {message.text}
+                      <ExpandableMessageText
+                        text={message.text}
+                        tone={isMine ? "inverse" : "default"}
+                      />
                     </div>
                   ) : null}
                   <span className="text-[10px] text-gray-400">
@@ -338,12 +346,14 @@ export function CustomerChat() {
                     <div className="w-12 h-12 rounded bg-gray-100 flex items-center justify-center">
                       <FiMic className="w-5 h-5 text-brand-600" />
                     </div>
-                    <audio
-                      src={fp.previewUrl}
-                      controls
-                      className="h-8 w-[120px] max-w-[120px]"
-                      preload="metadata"
-                    />
+                    <div className="rounded-md bg-gray-50 p-1 [color-scheme:light]">
+                      <audio
+                        src={fp.previewUrl}
+                        controls
+                        className="h-8 w-[120px] max-w-[120px]"
+                        preload="metadata"
+                      />
+                    </div>
                   </div>
                 ) : fp.type === "image" && fp.previewUrl ? (
                   <Image
@@ -409,9 +419,10 @@ export function CustomerChat() {
             </button>
 
             <textarea
+              ref={draftTextareaRef}
               rows={1}
               placeholder="Type your message..."
-              className="flex-1 min-w-0 bg-transparent border-none focus:ring-0 py-3 text-sm resize-none max-h-32 min-h-[44px] outline-none text-gray-700"
+              className="flex-1 min-w-0 bg-transparent border-none focus:ring-0 py-3 text-sm resize-none min-h-[44px] max-h-[215px] overflow-y-auto outline-none text-gray-700"
               value={draft}
               onChange={(event) => setDraft(event.target.value)}
               onFocus={() => setShowEmojiPicker(false)}
