@@ -76,7 +76,7 @@ export function CustomerInfoSidebarSection({ customer, onClose }: Props) {
       </div>
 
       {/* Scrollable Content */}
-      <div className="flex-1 overflow-y-auto p-5">
+      <div className="flex-1 overflow-y-auto py-5 px-4">
         {/* About Section */}
         <div className="mb-6">
           <h4 className="text-xs font-semibold text-gray-500 uppercase tracking-wider mb-3">

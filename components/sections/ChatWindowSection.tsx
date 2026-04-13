@@ -9,7 +9,17 @@ import {
   useRef,
   useState,
 } from "react";
-import { FiInfo, FiSend, FiSmile, FiPaperclip, FiX, FiFile, FiMic } from "react-icons/fi";
+import {
+  FiChevronDown,
+  FiInfo,
+  FiSend,
+  FiSmile,
+  FiPaperclip,
+  FiX,
+  FiFile,
+  FiMic,
+  FiSearch,
+} from "react-icons/fi";
 import {
   FaFilePdf,
   FaFileWord,
@@ -51,6 +61,12 @@ interface Props {
   onResolveChat: () => void;
   onToggleCustomerInfo: () => void;
   showCustomerInfo: boolean;
+  /** Optional — defaults to a demo toast. */
+  onTransferToQueue?: () => void;
+  /** Optional — defaults to a demo toast. */
+  onTransferToAgent?: (agentId: string, agentName: string) => void;
+  /** From getQueueNAssignedChats `userList` (id → name). */
+  transferAgents?: { id: string; name: string }[];
 }
 
 const ACCEPTED_IMAGE_TYPES = "image/jpeg,image/png,image/gif,image/webp";
@@ -132,8 +148,19 @@ export function ChatWindowSection({
   onResolveChat,
   onToggleCustomerInfo,
   showCustomerInfo,
+  onTransferToQueue,
+  onTransferToAgent,
+  transferAgents = [],
 }: Props) {
   const [draft, setDraft] = useState("");
+  const [transferMenuOpen, setTransferMenuOpen] = useState(false);
+  const [transferQueueConfirmOpen, setTransferQueueConfirmOpen] =
+    useState(false);
+  const [transferAgentModalOpen, setTransferAgentModalOpen] = useState(false);
+  const [selectedTransferAgentId, setSelectedTransferAgentId] = useState<
+    string | null
+  >(null);
+  const [transferAgentSearch, setTransferAgentSearch] = useState("");
   const [showEmojiPicker, setShowEmojiPicker] = useState(false);
   const [filePreviews, setFilePreviews] = useState<FilePreview[]>([]);
   const [imagePreview, setImagePreview] = useState<{
@@ -144,6 +171,94 @@ export function ChatWindowSection({
   const emojiPickerRef = useRef<HTMLDivElement>(null);
   const messagesScrollRef = useRef<HTMLDivElement>(null);
   const draftTextareaRef = useAutoGrowTextarea(draft);
+  const transferMenuRef = useRef<HTMLDivElement>(null);
+
+  useEffect(() => {
+    if (!transferMenuOpen) return;
+    const onPointerDown = (e: PointerEvent) => {
+      const el = transferMenuRef.current;
+      if (el && !el.contains(e.target as Node)) {
+        setTransferMenuOpen(false);
+      }
+    };
+    document.addEventListener("pointerdown", onPointerDown);
+    return () => document.removeEventListener("pointerdown", onPointerDown);
+  }, [transferMenuOpen]);
+
+  useEffect(() => {
+    if (
+      !transferQueueConfirmOpen &&
+      !transferAgentModalOpen &&
+      !transferMenuOpen
+    ) {
+      return;
+    }
+    const onKeyDown = (e: KeyboardEvent) => {
+      if (e.key === "Escape") {
+        setTransferMenuOpen(false);
+        setTransferQueueConfirmOpen(false);
+        setTransferAgentModalOpen(false);
+      }
+    };
+    document.addEventListener("keydown", onKeyDown);
+    return () => document.removeEventListener("keydown", onKeyDown);
+  }, [transferQueueConfirmOpen, transferAgentModalOpen, transferMenuOpen]);
+
+  useEffect(() => {
+    if (!transferAgentModalOpen) setTransferAgentSearch("");
+  }, [transferAgentModalOpen]);
+
+  const filteredTransferAgents = useMemo(() => {
+    const q = transferAgentSearch.trim().toLowerCase();
+    if (!q) return transferAgents;
+    return transferAgents.filter(
+      (a) =>
+        a.name.toLowerCase().includes(q) ||
+        String(a.id).toLowerCase().includes(q),
+    );
+  }, [transferAgents, transferAgentSearch]);
+
+  useEffect(() => {
+    if (!transferAgentModalOpen || !selectedTransferAgentId) return;
+    if (
+      !filteredTransferAgents.some((a) => a.id === selectedTransferAgentId)
+    ) {
+      setSelectedTransferAgentId(null);
+    }
+  }, [
+    transferAgentModalOpen,
+    filteredTransferAgents,
+    selectedTransferAgentId,
+  ]);
+
+  const openTransferAgentModal = () => {
+    setTransferMenuOpen(false);
+    setSelectedTransferAgentId(null);
+    setTransferAgentSearch("");
+    setTransferAgentModalOpen(true);
+  };
+
+  const confirmTransferQueue = () => {
+    setTransferQueueConfirmOpen(false);
+    if (onTransferToQueue) {
+      onTransferToQueue();
+    } else {
+      toast.success("Chat transferred to queue.");
+    }
+  };
+
+  const confirmTransferAgent = () => {
+    if (!selectedTransferAgentId) return;
+    const agent = transferAgents.find((a) => a.id === selectedTransferAgentId);
+    if (!agent) return;
+    setTransferAgentModalOpen(false);
+    setSelectedTransferAgentId(null);
+    if (onTransferToAgent) {
+      onTransferToAgent(agent.id, agent.name);
+    } else {
+      toast.success(`Transfer to ${agent.name} (demo).`);
+    }
+  };
 
   const messagesTailKey = useMemo(() => {
     if (!messages.length) return "";
@@ -319,7 +434,7 @@ export function ChatWindowSection({
   );
 
   return (
-    <section className="flex min-h-0 flex-1 flex-col bg-white">
+    <section className="flex min-h-0 flex-1 flex-col bg-white min-w-xl">
       {/* Header */}
       <div className="p-4 border-b border-gray-200 flex items-center justify-between shrink-0">
         <div className="flex items-center gap-3">
@@ -352,6 +467,53 @@ export function ChatWindowSection({
           >
             <FiInfo className="w-4 h-4" />
           </button>
+          <div className="relative" ref={transferMenuRef}>
+            <button
+              type="button"
+              onClick={() => setTransferMenuOpen((o) => !o)}
+              aria-expanded={transferMenuOpen}
+              aria-haspopup="menu"
+              aria-label="Transfer chat"
+              className={
+                "h-9 px-3 flex items-center gap-1.5 rounded-lg border border-gray-200 text-gray-700 text-sm font-medium " +
+                "hover:border-brand-300 hover:bg-brand-50 hover:text-brand-600 transition-colors cursor-pointer"
+              }
+            >
+              Transfer
+              <FiChevronDown
+                className={
+                  "w-4 h-4 shrink-0 transition-transform " +
+                  (transferMenuOpen ? "rotate-180" : "")
+                }
+              />
+            </button>
+            {transferMenuOpen ? (
+              <div
+                className="absolute right-0 top-full z-50 mt-1 min-w-[14rem] rounded-lg border border-gray-200 bg-white py-1 shadow-lg"
+                role="menu"
+              >
+                <button
+                  type="button"
+                  role="menuitem"
+                  className="flex w-full px-3 py-2.5 text-left text-sm text-gray-800 hover:bg-gray-50 cursor-pointer"
+                  onClick={() => {
+                    setTransferMenuOpen(false);
+                    setTransferQueueConfirmOpen(true);
+                  }}
+                >
+                  Transfer to queue
+                </button>
+                <button
+                  type="button"
+                  role="menuitem"
+                  className="flex w-full px-3 py-2.5 text-left text-sm text-gray-800 hover:bg-gray-50 cursor-pointer"
+                  onClick={openTransferAgentModal}
+                >
+                  Transfer to agent
+                </button>
+              </div>
+            ) : null}
+          </div>
           <button
             type="button"
             onClick={onResolveChat}
@@ -439,7 +601,7 @@ export function ChatWindowSection({
                                 </div>
                               </button>
                             ) : att.type === "audio" && att.url ? (
-                              <div className="rounded-lg bg-gray-50 p-1.5 [color-scheme:light]">
+                              <div className="rounded-lg [color-scheme:light]">
                                 <audio
                                   src={att.url}
                                   controls
@@ -548,7 +710,7 @@ export function ChatWindowSection({
                                 </div>
                               </button>
                             ) : att.type === "audio" && att.url ? (
-                              <div className="rounded-lg bg-gray-50 p-1.5 [color-scheme:light]">
+                              <div className="rounded-lg [color-scheme:light]">
                                 <audio
                                   src={att.url}
                                   controls
@@ -644,6 +806,161 @@ export function ChatWindowSection({
         </div>
       )}
 
+      {/* Transfer to queue — confirmation */}
+      {transferQueueConfirmOpen ? (
+        <div
+          className="fixed inset-0 z-[60] flex items-center justify-center bg-black/50 p-4"
+          role="dialog"
+          aria-modal="true"
+          aria-labelledby="transfer-queue-title"
+          onMouseDown={(e) => {
+            if (e.currentTarget === e.target) setTransferQueueConfirmOpen(false);
+          }}
+        >
+          <div className="w-full max-w-md rounded-xl bg-white p-6 shadow-xl">
+            <h2
+              id="transfer-queue-title"
+              className="text-lg font-semibold text-gray-900"
+            >
+              Transfer to queue?
+            </h2>
+            <p className="mt-2 text-sm text-gray-600">
+              Are you sure you want to move this conversation back to the queue?
+              The customer may be picked up by another agent.
+            </p>
+            <div className="mt-6 flex justify-end gap-2">
+              <button
+                type="button"
+                onClick={() => setTransferQueueConfirmOpen(false)}
+                className="px-4 py-2 rounded-lg border border-gray-200 text-sm font-medium text-gray-700 hover:bg-gray-50 transition-colors cursor-pointer"
+              >
+                Cancel
+              </button>
+              <button
+                type="button"
+                onClick={confirmTransferQueue}
+                className="px-4 py-2 rounded-lg bg-brand-600 text-white text-sm font-medium hover:bg-brand-700 transition-colors cursor-pointer"
+              >
+                Yes, transfer
+              </button>
+            </div>
+          </div>
+        </div>
+      ) : null}
+
+      {/* Transfer to agent — pick agent */}
+      {transferAgentModalOpen ? (
+        <div
+          className="fixed inset-0 z-[60] flex items-center justify-center bg-black/50 p-4"
+          role="dialog"
+          aria-modal="true"
+          aria-labelledby="transfer-agent-title"
+          onMouseDown={(e) => {
+            if (e.currentTarget === e.target) setTransferAgentModalOpen(false);
+          }}
+        >
+          <div className="w-full max-w-md rounded-xl bg-white p-6 shadow-xl">
+            <h2
+              id="transfer-agent-title"
+              className="text-lg font-semibold text-gray-900"
+            >
+              Transfer to agent
+            </h2>
+            <p className="mt-1 text-sm text-gray-500">
+              Select an agent from your team
+            </p>
+            <div className="mt-4">
+              <label
+                htmlFor="transfer-agent-search"
+                className="mb-1.5 block text-xs font-medium text-gray-600"
+              >
+                Search
+              </label>
+              <div className="relative">
+                <FiSearch
+                  className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-gray-400"
+                  aria-hidden
+                />
+                <input
+                  id="transfer-agent-search"
+                  type="search"
+                  value={transferAgentSearch}
+                  onChange={(e) => setTransferAgentSearch(e.target.value)}
+                  placeholder="Name or ID…"
+                  autoComplete="off"
+                  className="w-full rounded-lg border border-gray-200 py-2 pl-9 pr-3 text-sm text-gray-900 placeholder:text-gray-400 focus:outline-none focus:ring-2 focus:ring-brand-500 focus:border-transparent cursor-text"
+                />
+              </div>
+            </div>
+            <div
+              className="mt-3 p-0.5 max-h-72 overflow-y-auto rounded-lg border border-gray-200 divide-y divide-gray-100"
+              role="listbox"
+              aria-label="Agents"
+            >
+              {transferAgents.length === 0 ? (
+                <p className="px-3 py-8 text-center text-sm text-gray-500">
+                  No agents in the list yet. Refresh after the inbox loads, or
+                  check that the API returns id → name fields on the queue
+                  response.
+                </p>
+              ) : filteredTransferAgents.length === 0 ? (
+                <p className="px-3 py-8 text-center text-sm text-gray-500">
+                  No agents match your search.
+                </p>
+              ) : (
+                filteredTransferAgents.map((agent) => {
+                  const selected = selectedTransferAgentId === agent.id;
+                  return (
+                    <button
+                      key={agent.id}
+                      type="button"
+                      role="option"
+                      aria-selected={selected}
+                      onClick={() => setSelectedTransferAgentId(agent.id)}
+                      className={
+                        "flex w-full items-center gap-3 px-3 py-3 text-left text-sm transition-colors cursor-pointer rounded-md " +
+                        (selected
+                          ? "bg-brand-50 ring-2 ring-inset ring-brand-500"
+                          : "hover:bg-gray-50")
+                      }
+                    >
+                      <AvatarWithInitials
+                        name={agent.name}
+                        size={36}
+                        alt=""
+                      />
+                      <span className="font-medium text-gray-900">
+                        {agent.name}
+                      </span>
+                    </button>
+                  );
+                })
+              )}
+            </div>
+            <div className="mt-6 flex justify-end gap-2">
+              <button
+                type="button"
+                onClick={() => {
+                  setTransferAgentModalOpen(false);
+                  setSelectedTransferAgentId(null);
+                }}
+                className="px-4 py-2 rounded-lg border border-gray-200 text-sm font-medium text-gray-700 hover:bg-gray-50 transition-colors cursor-pointer"
+              >
+                Cancel
+              </button>
+              <button
+                type="button"
+                disabled={!selectedTransferAgentId}
+                onClick={confirmTransferAgent}
+                className="px-4 py-2 rounded-lg bg-brand-600 text-white text-sm font-medium hover:bg-brand-700 transition-colors cursor-pointer disabled:opacity-40 disabled:cursor-not-allowed"
+              >
+                Transfer
+              </button>
+            </div>
+          </div>
+        </div>
+      ) : null}
+
       {/* File Previews */}
       {filePreviews.length > 0 && (
         <div className="px-4 py-2 border-t border-gray-100 bg-gray-50">
@@ -658,7 +975,7 @@ export function ChatWindowSection({
                     <div className="w-12 h-12 rounded bg-gray-100 flex items-center justify-center">
                       <FiMic className="w-5 h-5 text-brand-600" />
                     </div>
-                    <div className="rounded-md bg-gray-50 p-1 [color-scheme:light]">
+                    <div className="rounded-md [color-scheme:light]">
                       <audio
                         src={fp.previewUrl}
                         controls

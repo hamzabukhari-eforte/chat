@@ -293,7 +293,7 @@ export function ChatAudioRecorderInner({
 
           {phase === "review" && reviewUrl && (
             <div className="flex flex-col gap-3">
-              <div className="rounded-md bg-gray-50 p-1.5 [color-scheme:light]">
+              <div className="rounded-md [color-scheme:light]">
                 <audio
                   src={reviewUrl}
                   controls

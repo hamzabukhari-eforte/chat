@@ -104,7 +104,7 @@ function MessageAttachments({ message }: { message: Message }) {
               />
             </a>
           ) : att.type === "audio" && att.url ? (
-            <div className="rounded-lg bg-gray-50 p-1.5 [color-scheme:light]">
+            <div className="rounded-lg [color-scheme:light]">
               <audio
                 src={att.url}
                 controls

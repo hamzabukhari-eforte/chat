@@ -62,16 +62,60 @@ function tryNormalizeBackendEvent(raw: unknown): IncomingEvent | null {
   };
 }
 
-/** SES `NEW_CHAT_IN_QUEUE` after initial `getQueueNAssignedChats` load. */
+/**
+ * SES / gateway variants for a queue row update:
+ * - `{ event: "NEW_CHAT_IN_QUEUE", data: { ... } }`
+ * - `{ type: "new-chat-in-queue", payload: { data: { ... } } }`
+ * - `{ type: "NEW_CHAT_IN_QUEUE", data: { ... } }`
+ */
 function tryNormalizeNewChatInQueue(raw: unknown): IncomingEvent | null {
   if (!raw || typeof raw !== "object") return null;
   const o = raw as Record<string, unknown>;
-  if (String(o.event).toUpperCase() !== "NEW_CHAT_IN_QUEUE") return null;
-  const data = o.data;
-  if (!data || typeof data !== "object") return null;
+
+  let data: Record<string, unknown> | null = null;
+
+  const eventName = o.event ?? o.Event;
+  if (
+    eventName !== undefined &&
+    String(eventName).toUpperCase() === "NEW_CHAT_IN_QUEUE"
+  ) {
+    const d = o.data;
+    if (d && typeof d === "object" && !Array.isArray(d)) {
+      data = d as Record<string, unknown>;
+    }
+  }
+
+  if (!data) {
+    const typeLabel = o.type ?? o.Type;
+    const tl = String(typeLabel ?? "")
+      .toLowerCase()
+      .replace(/_/g, "-");
+    const isNewQueue =
+      tl === "new-chat-in-queue" ||
+      String(typeLabel).toUpperCase() === "NEW_CHAT_IN_QUEUE";
+    if (isNewQueue) {
+      if (o.payload && typeof o.payload === "object") {
+        const p = o.payload as Record<string, unknown>;
+        const inner = p.data;
+        if (inner && typeof inner === "object" && !Array.isArray(inner)) {
+          data = inner as Record<string, unknown>;
+        }
+      }
+      if (
+        !data &&
+        o.data &&
+        typeof o.data === "object" &&
+        !Array.isArray(o.data)
+      ) {
+        data = o.data as Record<string, unknown>;
+      }
+    }
+  }
+
+  if (!data) return null;
   return {
     type: "new-chat-in-queue",
-    payload: { data: data as Record<string, unknown> },
+    payload: { data },
   };
 }
 

@@ -72,6 +72,9 @@ export function AgentDashboard() {
             onResolveChat={chat.resolveChat}
             onToggleCustomerInfo={() => setShowCustomerInfo((prev) => !prev)}
             showCustomerInfo={showCustomerInfo}
+            transferAgents={chat.transferAgents}
+            onTransferToQueue={chat.transferToQueue}
+            onTransferToAgent={chat.transferToAgent}
           />
           <AnimatePresence>
             {showCustomerInfo && (

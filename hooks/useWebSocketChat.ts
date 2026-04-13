@@ -47,6 +47,7 @@ const DEFAULT_QUEUE_CHATS_PATH =
 const DEFAULT_LOAD_CONVERSATION_PATH =
   "/SES/SocialMedia/whatsapp/loadConversationById";
 const DEFAULT_ASSIGN_CHAT_PATH = "/SES/SocialMedia/whatsapp/assignChat";
+const DEFAULT_TRANSFER_CHAT_PATH = "/SES/SocialMedia/whatsapp/transferChat";
 const DEFAULT_CLOSE_CHAT_PATH = "/SES/SocialMedia/whatsapp/closeChat";
 const DEFAULT_CHAT_WS_HOST = "10.0.10.53:8080";
 const DEFAULT_CHAT_WS_PATH = "/SES/WebLiveChat";
@@ -117,6 +118,17 @@ function getAssignChatUrl(): string {
   );
 }
 
+function getTransferChatUrl(): string {
+  const fromEnv =
+    typeof process !== "undefined" &&
+    process.env.NEXT_PUBLIC_TRANSFER_CHAT_URL
+      ? process.env.NEXT_PUBLIC_TRANSFER_CHAT_URL
+      : undefined;
+  return (
+    fromEnv ?? `${getDefaultApiOrigin()}${DEFAULT_TRANSFER_CHAT_PATH}`
+  ).replace(/\/$/, "");
+}
+
 function getCloseChatUrl(): string {
   const fromEnv =
     typeof process !== "undefined" && process.env.NEXT_PUBLIC_CLOSE_CHAT_URL
@@ -145,10 +157,79 @@ interface QueueNAssignedChatsResponse {
   domainIndex?: number;
   chatFrom?: number;
   userId?: string;
+  /** Agent id (numeric string) → display name. */
+  userList?: Record<string, string | number>;
   queueChats: QueueNAssignedRow[];
   queueCount: number;
   assignedCount: number;
   assignedChats: QueueNAssignedRow[];
+}
+
+/** Known JSON keys on getQueueNAssignedChats — anything else is ignored for legacy top-level agent map extraction. */
+const QUEUE_RESPONSE_STRUCTURE_KEYS = new Set([
+  "queueChats",
+  "assignedChats",
+  "queueCount",
+  "assignedCount",
+  "domainIndex",
+  "chatFrom",
+  "userId",
+  "userList",
+]);
+
+function parseNumericIdAgentMap(
+  map: unknown,
+): { id: string; name: string }[] {
+  if (!map || typeof map !== "object" || Array.isArray(map)) return [];
+  const o = map as Record<string, unknown>;
+  const out: { id: string; name: string }[] = [];
+  for (const key of Object.keys(o)) {
+    if (!/^\d+$/.test(key)) continue;
+    const v = o[key];
+    const name =
+      typeof v === "string"
+        ? v.trim()
+        : typeof v === "number" && Number.isFinite(v)
+          ? String(v)
+          : "";
+    if (!name) continue;
+    out.push({ id: key, name });
+  }
+  return out;
+}
+
+/**
+ * SES returns agents in `userList`, e.g. `{ "1": "Administrator", userList: { "24": "Wajid" }, ... }`.
+ * Falls back to legacy top-level numeric keys when `userList` is absent or empty.
+ */
+function extractTransferAgentsFromQueueResponse(
+  data: unknown,
+): { id: string; name: string }[] {
+  if (!data || typeof data !== "object" || Array.isArray(data)) return [];
+  const o = data as Record<string, unknown>;
+  const fromUserList = parseNumericIdAgentMap(o.userList);
+  if (fromUserList.length > 0) {
+    fromUserList.sort((a, b) =>
+      a.name.localeCompare(b.name, undefined, { sensitivity: "base" }),
+    );
+    return fromUserList;
+  }
+  const out: { id: string; name: string }[] = [];
+  for (const key of Object.keys(o)) {
+    if (QUEUE_RESPONSE_STRUCTURE_KEYS.has(key)) continue;
+    if (!/^\d+$/.test(key)) continue;
+    const v = o[key];
+    const name =
+      typeof v === "string"
+        ? v.trim()
+        : typeof v === "number" && Number.isFinite(v)
+          ? String(v)
+          : "";
+    if (!name) continue;
+    out.push({ id: key, name });
+  }
+  out.sort((a, b) => a.name.localeCompare(b.name, undefined, { sensitivity: "base" }));
+  return out;
 }
 
 interface BackendWsInitializer {
@@ -480,6 +561,14 @@ function getChatIndexForApi(chat: Chat): string | number | null {
   return raw;
 }
 
+function chatIndexToApiInt(chatIndex: string | number): number | null {
+  if (typeof chatIndex === "number" && Number.isFinite(chatIndex)) {
+    return Math.trunc(chatIndex);
+  }
+  const n = Number(String(chatIndex).trim());
+  return Number.isFinite(n) ? Math.trunc(n) : null;
+}
+
 /** Oldest first, newest last (stable when timestamps tie). */
 function sortMessagesChronologically(messages: Message[]): Message[] {
   return [...messages].sort((a, b) => {
@@ -497,6 +586,7 @@ async function fetchQueueAndAssignedChats(agent: User): Promise<{
   initializer: BackendWsInitializer | null;
   domainIndex: number | null;
   chatFrom: number | null;
+  transferAgents: { id: string; name: string }[];
 }> {
   const url = new URL(getQueueChatsUrl());
   if (shouldSendUserIdInParams()) {
@@ -510,7 +600,9 @@ async function fetchQueueAndAssignedChats(agent: User): Promise<{
   if (!res.ok) {
     throw new Error(`Queue chats failed: ${res.status}`);
   }
-  const data = (await res.json()) as QueueNAssignedChatsResponse;
+  const raw: unknown = await res.json();
+  const data = raw as QueueNAssignedChatsResponse;
+  const transferAgents = extractTransferAgentsFromQueueResponse(raw);
   const queue = (data.queueChats ?? []).map((r) =>
     mapQueueRowToChat(r, "queued"),
   );
@@ -535,6 +627,7 @@ async function fetchQueueAndAssignedChats(agent: User): Promise<{
     domainIndex:
       data.domainIndex !== undefined ? Number(data.domainIndex) : null,
     chatFrom: data.chatFrom !== undefined ? Number(data.chatFrom) : null,
+    transferAgents,
   };
 }
 
@@ -544,6 +637,19 @@ function parseAssignStatus(json: unknown): number | null {
   const obj = json as Record<string, unknown>;
   const raw = obj.status ?? obj.assignStatus ?? obj.code ?? obj.result;
   if (typeof raw === "number") return raw;
+  if (typeof raw === "string") {
+    const n = Number(raw);
+    return Number.isFinite(n) ? n : null;
+  }
+  return null;
+}
+
+/** transferChat JSON: `status` 0 = cannot transfer, 1 = success, 2 = already closed. */
+function parseTransferChatStatus(json: unknown): number | null {
+  if (typeof json === "number") return json;
+  if (!json || typeof json !== "object") return null;
+  const raw = (json as Record<string, unknown>).status;
+  if (typeof raw === "number" && Number.isFinite(raw)) return raw;
   if (typeof raw === "string") {
     const n = Number(raw);
     return Number.isFinite(n) ? n : null;
@@ -575,6 +681,42 @@ async function assignChatToAgent(
   }
   const json: unknown = await res.json();
   return parseAssignStatus(json);
+}
+
+/**
+ * `agentIndex`: `0` when returning to queue; otherwise target agent id from `userList`.
+ * `isTransferredToAgent`: `false` for queue, `true` for agent.
+ */
+async function transferWhatsAppChat(
+  chatIndex: string | number,
+  domainIndex: number,
+  chatFrom: number,
+  userId: string,
+  agentIndex: number,
+  isTransferredToAgent: boolean,
+): Promise<number | null> {
+  const ci = chatIndexToApiInt(chatIndex);
+  if (ci === null) return null;
+  const url = new URL(getTransferChatUrl());
+  if (shouldSendUserIdInParams()) {
+    url.searchParams.set("Userid", userId);
+  }
+  const res = await fetch(url.toString(), {
+    method: "POST",
+    credentials: getApiFetchCredentials(),
+    body: JSON.stringify({
+      chatIndex: ci,
+      domainIndex: Math.trunc(domainIndex),
+      chatFrom: Math.trunc(chatFrom),
+      agentIndex: Math.trunc(agentIndex),
+      isTransferredToAgent,
+    }),
+  });
+  if (!res.ok) {
+    throw new Error(`transferChat failed: ${res.status}`);
+  }
+  const json: unknown = await res.json();
+  return parseTransferChatStatus(json);
 }
 
 async function closeWhatsAppChat(
@@ -609,6 +751,8 @@ interface State {
   activeChatId: string | null;
   domainIndex: number | null;
   chatFrom: number | null;
+  /** Agent id → display name from getQueueNAssignedChats `userList` (or legacy top-level numeric keys). */
+  transferAgents: { id: string; name: string }[];
   /** `CHAT_SEEN` can arrive before `NEW_MESSAGE`; apply when a message with that `id` appears. */
   pendingSeenByMsgId: Record<string, 3 | 4>;
 }
@@ -619,6 +763,7 @@ const initialState: State = {
   activeChatId: null,
   domainIndex: null,
   chatFrom: null,
+  transferAgents: [],
   pendingSeenByMsgId: {},
 };
 
@@ -892,6 +1037,7 @@ export function useWebSocketChat(currentUser: User | null) {
           chats: mergeChatsById(prev.chats, result.chats),
           domainIndex: result.domainIndex ?? prev.domainIndex,
           chatFrom: result.chatFrom ?? prev.chatFrom,
+          transferAgents: result.transferAgents,
         }));
       })
       .catch(() => {
@@ -1503,6 +1649,146 @@ export function useWebSocketChat(currentUser: User | null) {
     }
   };
 
+  const removeActiveChatAfterHandoff = (chatId: string) => {
+    setState((prev) => ({
+      ...prev,
+      chats: prev.chats.filter((c) => c.id !== chatId),
+      activeChatId: prev.activeChatId === chatId ? null : prev.activeChatId,
+      messages: prev.messages.filter((m) => m.chatId !== chatId),
+    }));
+  };
+
+  /** After transfer-to-queue HTTP success: keep the row in the list as queued (avoids racing WS `new-chat-in-queue`). */
+  const demoteChatToQueueInState = (chatId: string) => {
+    setState((prev) => {
+      const hasChat = prev.chats.some((c) => c.id === chatId);
+      if (!hasChat) {
+        return {
+          ...prev,
+          activeChatId: prev.activeChatId === chatId ? null : prev.activeChatId,
+        };
+      }
+      return {
+        ...prev,
+        chats: prev.chats.map((c) =>
+          c.id === chatId
+            ? { ...c, status: "queued" as const, agent: undefined }
+            : c,
+        ),
+        activeChatId: prev.activeChatId === chatId ? null : prev.activeChatId,
+      };
+    });
+  };
+
+  const transferToQueue = () => {
+    if (!currentUser || currentUser.role !== "agent" || !state.activeChatId) {
+      return;
+    }
+    const chatId = state.activeChatId;
+    const chat = state.chats.find((c) => c.id === chatId);
+    if (!chat) return;
+    if (state.domainIndex === null || state.chatFrom === null) {
+      toast.error("Unable to transfer this chat right now.");
+      return;
+    }
+    const chatIndex = getChatIndexForApi(chat);
+    if (chatIndex === null || String(chatIndex).trim() === "") {
+      toast.error("Unable to transfer this chat right now.");
+      return;
+    }
+
+    void (async () => {
+      try {
+        const status = await transferWhatsAppChat(
+          chatIndex,
+          state.domainIndex!,
+          state.chatFrom!,
+          currentUser.id,
+          0,
+          false,
+        );
+        if (status === null) {
+          toast.error("Unable to transfer this chat right now.");
+          return;
+        }
+        if (status === 0) {
+          toast.error("Unable to transfer this chat right now.");
+          return;
+        }
+        if (status === 1) {
+          toast.success("Chat transferred to queue.");
+          demoteChatToQueueInState(chatId);
+          return;
+        }
+        if (status === 2) {
+          toast.info("This chat is already closed.");
+          removeActiveChatAfterHandoff(chatId);
+          return;
+        }
+        toast.error("Unable to transfer this chat right now.");
+      } catch {
+        toast.error("Unable to transfer this chat right now.");
+      }
+    })();
+  };
+
+  const transferToAgent = (agentId: string, agentName: string) => {
+    if (!currentUser || currentUser.role !== "agent" || !state.activeChatId) {
+      return;
+    }
+    const agentIndex = Number(String(agentId).trim());
+    if (!Number.isFinite(agentIndex)) {
+      toast.error("Invalid agent selected.");
+      return;
+    }
+    const chatId = state.activeChatId;
+    const chat = state.chats.find((c) => c.id === chatId);
+    if (!chat) return;
+    if (state.domainIndex === null || state.chatFrom === null) {
+      toast.error("Unable to transfer this chat right now.");
+      return;
+    }
+    const chatIndex = getChatIndexForApi(chat);
+    if (chatIndex === null || String(chatIndex).trim() === "") {
+      toast.error("Unable to transfer this chat right now.");
+      return;
+    }
+
+    void (async () => {
+      try {
+        const status = await transferWhatsAppChat(
+          chatIndex,
+          state.domainIndex!,
+          state.chatFrom!,
+          currentUser.id,
+          agentIndex,
+          true,
+        );
+        if (status === null) {
+          toast.error("Unable to transfer this chat right now.");
+          return;
+        }
+        if (status === 0) {
+          toast.error("Unable to transfer this chat right now.");
+          return;
+        }
+        if (status === 1) {
+          toast.success(`Chat transferred to ${agentName}.`);
+          removeActiveChatAfterHandoff(chatId);
+          return;
+        }
+        if (status === 2) {
+          toast.info("This chat is already closed.");
+          removeActiveChatAfterHandoff(chatId);
+          return;
+        }
+        toast.error("Unable to transfer this chat right now.");
+      } catch {
+        toast.error("Unable to transfer this chat right now.");
+      }
+    })();
+  };
+
   const resolveChat = () => {
     if (!currentUser || !state.activeChatId) return;
     const chatId = state.activeChatId;
@@ -1637,9 +1923,12 @@ export function useWebSocketChat(currentUser: User | null) {
     activeChat,
     activeMessages,
     activeChatId: state.activeChatId,
+    transferAgents: state.transferAgents,
     startChat,
     claimChat,
     sendMessage,
+    transferToQueue,
+    transferToAgent,
     resolveChat,
     selectChat,
   };
