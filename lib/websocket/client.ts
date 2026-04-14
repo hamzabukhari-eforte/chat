@@ -62,6 +62,40 @@ function tryNormalizeBackendEvent(raw: unknown): IncomingEvent | null {
   };
 }
 
+/** SES transfer notification: `{ event: "CHAT_TRANSFER", data: { chatId, ... } }`. */
+function tryNormalizeChatTransfer(raw: unknown): IncomingEvent | null {
+  if (!raw || typeof raw !== "object") return null;
+  const o = raw as Record<string, unknown>;
+  const eventName = o.event ?? o.type ?? o.Event ?? o.Type;
+  if (String(eventName).toUpperCase() !== "CHAT_TRANSFER") return null;
+
+  const data =
+    o.data && typeof o.data === "object" && !Array.isArray(o.data)
+      ? (o.data as Record<string, unknown>)
+      : o;
+
+  const chatIdRaw = data.chatId ?? data.chatroomId ?? data.chatIndex;
+  if (chatIdRaw === undefined || chatIdRaw === null) return null;
+  const chatId = String(chatIdRaw).trim();
+  if (!chatId) return null;
+
+  const toOptionalNumber = (v: unknown): number | undefined => {
+    if (v === undefined || v === null || String(v).trim() === "") return undefined;
+    const n = Number(v);
+    return Number.isFinite(n) ? n : undefined;
+  };
+
+  return {
+    type: "chat-transfer",
+    payload: {
+      chatId,
+      chatStatus: toOptionalNumber(data.chatStatus),
+      domainIndex: toOptionalNumber(data.domainIndex),
+      chatFrom: toOptionalNumber(data.chatFrom),
+    },
+  };
+}
+
 /**
  * SES / gateway variants for a queue row update:
  * - `{ event: "NEW_CHAT_IN_QUEUE", data: { ... } }`
@@ -555,6 +589,7 @@ export class ChatWebSocketClient {
           tryNormalizeBackendEvent(raw) ??
           tryNormalizeNewMessage(raw) ??
           tryNormalizeNewChatInQueue(raw) ??
+          tryNormalizeChatTransfer(raw) ??
           tryNormalizeChatSeen(raw);
         const parsed = enrichIncomingMessageTimes(
           (normalized ?? raw) as IncomingEvent,

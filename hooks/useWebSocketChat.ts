@@ -1053,13 +1053,10 @@ export function useWebSocketChat(currentUser: User | null) {
     [],
   );
 
-  useEffect(() => {
+  const refreshAgentChatsFromApi = useCallback(() => {
     if (!currentUser || currentUser.role !== "agent") return;
-
-    let cancelled = false;
     fetchQueueAndAssignedChats(currentUser)
       .then((result) => {
-        if (cancelled) return;
         client.setInitializer(result.initializer);
         setState((prev) => ({
           ...prev,
@@ -1072,16 +1069,19 @@ export function useWebSocketChat(currentUser: User | null) {
       .catch(() => {
         // API optional; WebSocket demo may still update state.
       });
+  }, [client, currentUser]);
 
-    return () => {
-      cancelled = true;
-    };
-  }, [client, currentUser?.id, currentUser?.role]); // eslint-disable-line react-hooks/exhaustive-deps -- refetch on identity/role only
+  useEffect(() => {
+    refreshAgentChatsFromApi();
+  }, [refreshAgentChatsFromApi]);
 
   useEffect(() => {
     const userId = currentUser?.id;
     client.connect();
     const unsubscribe = client.subscribe((event) => {
+      if (event.type === "chat-transfer") {
+        refreshAgentChatsFromApi();
+      }
       setState((prev) => {
         switch (event.type) {
           case "chat-queued": {
@@ -1322,6 +1322,20 @@ export function useWebSocketChat(currentUser: User | null) {
               pendingSeenByMsgId: { ...prev.pendingSeenByMsgId, [key]: st },
             };
           }
+          case "chat-transfer": {
+            return {
+              ...prev,
+              chats: prev.chats.map((c) =>
+                c.id === event.payload.chatId && currentUser?.role === "agent"
+                  ? {
+                      ...c,
+                      status: "assigned",
+                      agent: currentUser,
+                    }
+                  : c,
+              ),
+            };
+          }
           default:
             return prev;
         }
@@ -1330,7 +1344,7 @@ export function useWebSocketChat(currentUser: User | null) {
     return () => {
       unsubscribe();
     };
-  }, [client, currentUser?.id]);
+  }, [client, currentUser, refreshAgentChatsFromApi]);
 
   const agentLiveChatContextRef = useRef<{
     activeChatId: string | null;

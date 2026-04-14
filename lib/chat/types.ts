@@ -132,5 +132,15 @@ export type IncomingEvent =
   | {
       type: "chat-seen";
       payload: { msgId: string; status: 3 | 4 };
+    }
+  | {
+      /** SES WebSocket `CHAT_TRANSFER` notifying chat ownership changes. */
+      type: "chat-transfer";
+      payload: {
+        chatId: string;
+        chatStatus?: number;
+        domainIndex?: number;
+        chatFrom?: number;
+      };
     };
 
