@@ -138,6 +138,7 @@ export type IncomingEvent =
       type: "chat-transfer";
       payload: {
         chatId: string;
+        userName?: string;
         chatStatus?: number;
         domainIndex?: number;
         chatFrom?: number;

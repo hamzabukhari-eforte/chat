@@ -1047,29 +1047,83 @@ async function sendFileChunksViaWebSocket(
 
 export function useWebSocketChat(currentUser: User | null) {
   const [state, setState] = useState<State>(initialState);
+  const transferToastDedupRef = useRef<Record<string, number>>({});
 
   const client = useMemo(
     () => new ChatWebSocketClient(getChatWebSocketUrl()),
     [],
   );
 
-  const refreshAgentChatsFromApi = useCallback(() => {
-    if (!currentUser || currentUser.role !== "agent") return;
-    fetchQueueAndAssignedChats(currentUser)
-      .then((result) => {
-        client.setInitializer(result.initializer);
-        setState((prev) => ({
-          ...prev,
-          chats: mergeChatsById(prev.chats, result.chats),
-          domainIndex: result.domainIndex ?? prev.domainIndex,
-          chatFrom: result.chatFrom ?? prev.chatFrom,
-          transferAgents: result.transferAgents,
-        }));
-      })
-      .catch(() => {
-        // API optional; WebSocket demo may still update state.
-      });
-  }, [client, currentUser]);
+  const refreshAgentChatsFromApi = useCallback(
+    (opts?: {
+      notifyAssignedChatId?: string;
+      notifyAssignedUserName?: string;
+      source?: "chat-transfer";
+    }) => {
+      const agentId = currentUser?.id;
+      if (!agentId || currentUser.role !== "agent") return;
+      fetchQueueAndAssignedChats(currentUser)
+        .then((result) => {
+          client.setInitializer(result.initializer);
+          setState((prev) => {
+            const nextChats = mergeChatsById(prev.chats, result.chats);
+            const notifyAssignedChatId = opts?.notifyAssignedChatId;
+            if (notifyAssignedChatId && opts?.source === "chat-transfer") {
+              const wasMyChat = prev.chats.some(
+                (c) =>
+                  c.id === notifyAssignedChatId &&
+                  c.status !== "queued" &&
+                  c.agent?.id === agentId,
+              );
+              const isNowMyChat = nextChats.some(
+                (c) =>
+                  c.id === notifyAssignedChatId &&
+                  c.status !== "queued" &&
+                  c.agent?.id === agentId,
+              );
+              if (!wasMyChat && isNowMyChat) {
+                const lastToastAtMs =
+                  transferToastDedupRef.current[notifyAssignedChatId] ?? 0;
+                const nowMs = Date.now();
+                if (nowMs - lastToastAtMs < 4000) {
+                  return {
+                    ...prev,
+                    chats: nextChats,
+                    domainIndex: result.domainIndex ?? prev.domainIndex,
+                    chatFrom: result.chatFrom ?? prev.chatFrom,
+                    transferAgents: result.transferAgents,
+                  };
+                }
+                transferToastDedupRef.current[notifyAssignedChatId] = nowMs;
+                const assignedUserNameRaw = opts.notifyAssignedUserName?.trim();
+                const assignedUserName =
+                  assignedUserNameRaw &&
+                  assignedUserNameRaw.toLowerCase() !== "undefined" &&
+                  assignedUserNameRaw.toLowerCase() !== "null"
+                    ? assignedUserNameRaw
+                    : undefined;
+                toast.success(
+                  assignedUserName
+                    ? `${assignedUserName}'s chat has been transferred to you.`
+                    : "A chat has been transferred to you.",
+                );
+              }
+            }
+            return {
+              ...prev,
+              chats: nextChats,
+              domainIndex: result.domainIndex ?? prev.domainIndex,
+              chatFrom: result.chatFrom ?? prev.chatFrom,
+              transferAgents: result.transferAgents,
+            };
+          });
+        })
+        .catch(() => {
+          // API optional; WebSocket demo may still update state.
+        });
+    },
+    [client, currentUser],
+  );
 
   useEffect(() => {
     refreshAgentChatsFromApi();
@@ -1080,7 +1134,11 @@ export function useWebSocketChat(currentUser: User | null) {
     client.connect();
     const unsubscribe = client.subscribe((event) => {
       if (event.type === "chat-transfer") {
-        refreshAgentChatsFromApi();
+        refreshAgentChatsFromApi({
+          notifyAssignedChatId: event.payload.chatId,
+          notifyAssignedUserName: event.payload.userName,
+          source: "chat-transfer",
+        });
       }
       setState((prev) => {
         switch (event.type) {
@@ -1323,18 +1381,7 @@ export function useWebSocketChat(currentUser: User | null) {
             };
           }
           case "chat-transfer": {
-            return {
-              ...prev,
-              chats: prev.chats.map((c) =>
-                c.id === event.payload.chatId && currentUser?.role === "agent"
-                  ? {
-                      ...c,
-                      status: "assigned",
-                      agent: currentUser,
-                    }
-                  : c,
-              ),
-            };
+            return prev;
           }
           default:
             return prev;

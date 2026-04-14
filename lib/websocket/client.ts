@@ -85,10 +85,31 @@ function tryNormalizeChatTransfer(raw: unknown): IncomingEvent | null {
     return Number.isFinite(n) ? n : undefined;
   };
 
+  const pickOptionalName = (...values: unknown[]): string | undefined => {
+    for (const value of values) {
+      if (typeof value !== "string") continue;
+      const trimmed = value.trim();
+      if (!trimmed) continue;
+      const lowered = trimmed.toLowerCase();
+      if (lowered === "undefined" || lowered === "null" || lowered === "n/a") {
+        continue;
+      }
+      return trimmed;
+    }
+    return undefined;
+  };
+
   return {
     type: "chat-transfer",
     payload: {
       chatId,
+      userName: pickOptionalName(
+        data.userName,
+        data.username,
+        data.user_name,
+        data.customerName,
+        data.name,
+      ),
       chatStatus: toOptionalNumber(data.chatStatus),
       domainIndex: toOptionalNumber(data.domainIndex),
       chatFrom: toOptionalNumber(data.chatFrom),
