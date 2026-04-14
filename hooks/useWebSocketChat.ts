@@ -151,6 +151,7 @@ interface QueueNAssignedRow {
   chatIndex: string | number;
   email: string;
   counts?: number;
+  isChatActive?: boolean;
 }
 
 interface QueueNAssignedChatsResponse {
@@ -313,6 +314,9 @@ function mapQueueRowToChat(
         ? formatMessageTimeForDisplay(row.messageTime)
         : undefined,
     whatsappChatIndex: row.chatIndex,
+    isChatActive: parseOptionalIsChatActive(
+      (row as unknown as { isChatActive?: unknown }).isChatActive,
+    ),
   };
 }
 
@@ -342,6 +346,7 @@ function mapNewChatInQueueDataToChat(data: Record<string, unknown>): Chat | null
     region: nullifyDash(data.region),
     chatIndex,
     email: String(data.email ?? ""),
+    isChatActive: parseOptionalIsChatActive(data.isChatActive),
   };
   return mapQueueRowToChat(row, "queued");
 }
@@ -523,12 +528,35 @@ function extractSessionStatus(json: unknown): number | null {
   return null;
 }
 
+/** When present, `false` means the chat is closed and should not be opened. */
+function extractIsChatActive(json: unknown): boolean | null {
+  if (!json || typeof json !== "object" || Array.isArray(json)) return null;
+  const raw = (json as Record<string, unknown>).isChatActive;
+  if (typeof raw === "boolean") return raw;
+  if (raw === "true" || raw === 1) return true;
+  if (raw === "false" || raw === 0) return false;
+  return null;
+}
+
+/** For queue row / chat mapping: set `Chat.isChatActive` only when the API sends a value. */
+function parseOptionalIsChatActive(raw: unknown): boolean | undefined {
+  if (raw === undefined || raw === null) return undefined;
+  if (typeof raw === "boolean") return raw;
+  if (raw === "true" || raw === 1) return true;
+  if (raw === "false" || raw === 0) return false;
+  return undefined;
+}
+
 async function fetchConversationByChatIndex(
   chatIndex: string | number,
   chatId: string,
   agentUserId: string,
   customerId: string,
-): Promise<{ sessionStatus: number | null; messages: Message[] }> {
+): Promise<{
+  sessionStatus: number | null;
+  isChatActive: boolean | null;
+  messages: Message[];
+}> {
   const url = new URL(getLoadConversationUrl());
   url.searchParams.set("Userid", agentUserId);
 
@@ -542,13 +570,14 @@ async function fetchConversationByChatIndex(
   }
   const json: unknown = await res.json();
   const sessionStatus = extractSessionStatus(json);
+  const isChatActive = extractIsChatActive(json);
   const messages = parseLoadConversationMessages(
     json,
     chatId,
     agentUserId,
     customerId,
   );
-  return { sessionStatus, messages };
+  return { sessionStatus, isChatActive, messages };
 }
 
 /** SES `chatIndex` for APIs: prefer row index, else `chat.id` (also derived from chatIndex). */
@@ -1725,6 +1754,11 @@ export function useWebSocketChat(currentUser: User | null) {
           removeActiveChatAfterHandoff(chatId);
           return;
         }
+        if (status === 3) {
+          toast.info("Self-assignment isn't allowed - pick another agent.");
+          removeActiveChatAfterHandoff(chatId);
+          return;
+        }
         toast.error("Unable to transfer this chat right now.");
       } catch {
         toast.error("Unable to transfer this chat right now.");
@@ -1780,6 +1814,10 @@ export function useWebSocketChat(currentUser: User | null) {
         if (status === 2) {
           toast.info("This chat is already closed.");
           removeActiveChatAfterHandoff(chatId);
+          return;
+        }
+        if (status === 3) {
+          toast.info("Self-assignment isn't allowed - pick another agent.");
           return;
         }
         toast.error("Unable to transfer this chat right now.");
@@ -1866,22 +1904,31 @@ export function useWebSocketChat(currentUser: User | null) {
       }
 
       try {
-        const { sessionStatus, messages } = await fetchConversationByChatIndex(
-          chatIndex,
-          chatId,
-          currentUser.id,
-          chat.customer.id,
-        );
+        const { sessionStatus, isChatActive, messages } =
+          await fetchConversationByChatIndex(
+            chatIndex,
+            chatId,
+            currentUser.id,
+            chat.customer.id,
+          );
 
-        if (sessionStatus === 1) {
-          toast.error("Chat has been closed due to a session timeout!");
+        if (isChatActive === false) {
+          toast.info("This chat is already closed.");
+          removeActiveChatAfterHandoff(chatId);
           return;
         }
 
-        const sessionOk = sessionStatus === 0 || sessionStatus === null;
-        if (!sessionOk) {
-          toast.error("Unable to load this chat right now.");
+        const useLegacySession = isChatActive === null;
+        if (useLegacySession && sessionStatus === 1) {
+          toast.error("Chat has been closed due to a session timeout!");
           return;
+        }
+        if (useLegacySession) {
+          const sessionOk = sessionStatus === 0 || sessionStatus === null;
+          if (!sessionOk) {
+            toast.error("Unable to load this chat right now.");
+            return;
+          }
         }
 
         setState((prev) => {
@@ -1891,9 +1938,14 @@ export function useWebSocketChat(currentUser: User | null) {
             pending = a.pending;
             return a.message;
           });
+          const chatActivePatch =
+            isChatActive === null ? {} : { isChatActive };
           return {
             ...prev,
             activeChatId: chatId,
+            chats: prev.chats.map((c) =>
+              c.id === chatId ? { ...c, ...chatActivePatch } : c,
+            ),
             messages: [
               ...prev.messages.filter((m) => m.chatId !== chatId),
               ...merged,

@@ -294,7 +294,7 @@ export function CustomerChat() {
             return (
               <div
                 key={stableMessageListKey(message)}
-                className={`flex items-start gap-2 max-w-[80%] ${
+                className={`flex min-w-0 items-start gap-2 max-w-[80%] ${
                   isMine ? "self-end flex-row-reverse" : ""
                 }`}
               >
@@ -306,7 +306,7 @@ export function CustomerChat() {
                   {message.text ? (
                     <div
                       className={
-                        "px-4 py-2.5 rounded-2xl shadow-sm text-sm min-w-0 max-w-[60vw] " +
+                        "px-4 py-2.5 rounded-2xl shadow-sm text-sm min-w-0 max-w-[min(70vw,100%)] " +
                         (isMine
                           ? "bg-brand-600 text-white"
                           : "bg-white border border-gray-100 text-gray-800")

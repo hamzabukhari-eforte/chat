@@ -559,8 +559,8 @@ export function ChatWindowSection({
               )}
 
               {isAgent ? (
-                <div className="flex gap-3 justify-end">
-                  <div className="flex-1 flex flex-col items-end">
+                <div className="flex gap-3 justify-end min-w-0">
+                  <div className="flex min-w-0 flex-1 flex-col items-end">
                     {message.attachments && message.attachments.length > 0 && (
                       <div className="flex flex-wrap gap-2 mb-2 justify-end">
                         {message.attachments.map((att) => (
@@ -642,7 +642,7 @@ export function ChatWindowSection({
                       </div>
                     )}
                     {(message.text?.length ?? 0) > 0 && (
-                      <div className="bg-brand-500 text-white rounded-2xl rounded-tr-sm px-4 py-2.5 inline-block max-w-[60vw]">
+                      <div className="bg-brand-500 text-white rounded-2xl rounded-tr-sm px-4 py-2.5 inline-block max-w-[min(70vw,100%)]">
                         <ExpandableMessageText
                           text={message.text!}
                           tone="inverse"
@@ -662,14 +662,14 @@ export function ChatWindowSection({
                   />
                 </div>
               ) : (
-                <div className="flex gap-3">
+                <div className="flex min-w-0 gap-3">
                   <AvatarWithInitials
                     name={customerName}
                     src={activeChat.customer.avatar}
                     size={32}
                     alt={customerName}
                   />
-                  <div className="flex-1">
+                  <div className="min-w-0 flex-1">
                     {message.attachments && message.attachments.length > 0 && (
                       <div className="flex flex-wrap gap-2 mb-2">
                         {message.attachments.map((att) => (
@@ -751,7 +751,7 @@ export function ChatWindowSection({
                       </div>
                     )}
                     {(message.text?.length ?? 0) > 0 && (
-                      <div className="bg-gray-100 rounded-2xl rounded-tl-sm px-4 py-2.5 inline-block max-w-[60vw] text-gray-800">
+                      <div className="bg-gray-100 rounded-2xl rounded-tl-sm px-4 py-2.5 inline-block max-w-[min(70vw,100%)] text-gray-800">
                         <ExpandableMessageText text={message.text!} />
                       </div>
                     )}

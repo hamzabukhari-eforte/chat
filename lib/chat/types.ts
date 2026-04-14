@@ -29,6 +29,8 @@ export interface Chat {
   messageTimeDisplay?: string;
   /** WhatsApp / SES chat index for `loadConversationById` API. */
   whatsappChatIndex?: string | number;
+  /** When known (queue API / loadConversation), drives sidebar status dot: active = green. */
+  isChatActive?: boolean;
 }
 
 export interface Attachment {

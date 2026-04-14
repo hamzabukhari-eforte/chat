@@ -43,23 +43,25 @@ function computeTruncation(
   }
 
   const lh = parseFloat(getComputedStyle(measureEl).lineHeight);
-  const maxHeight = (Number.isFinite(lh) ? lh : 21) * maxLines + 2;
+  const lineHeight = Number.isFinite(lh) && lh > 0 ? lh : 21;
+  const maxHeight = lineHeight * maxLines + 2;
+  /** Avoid subpixel / rounding flicker between needsTruncate true vs false. */
+  const fitsHeight = (el: HTMLElement) => el.scrollHeight <= maxHeight + 1;
 
   const fitsPrefix = (len: number): boolean => {
     const sub = full.slice(0, len);
     measureEl.textContent = `${sub}… Read more`;
-    return measureEl.scrollHeight <= maxHeight && sub.length <= maxChars;
+    return fitsHeight(measureEl) && sub.length <= maxChars;
   };
 
   measureEl.textContent = full;
   const fitsChars = full.length <= maxChars;
-  const fitsLines = measureEl.scrollHeight <= maxHeight;
+  const fitsLines = fitsHeight(measureEl);
 
+  // If the full message already fits within limits, show it as-is — never append
+  // "Read more" (the old suffix check could fail spuriously and binary-search down to 1 char).
   if (fitsChars && fitsLines) {
-    measureEl.textContent = `${full}… Read more`;
-    if (measureEl.scrollHeight <= maxHeight) {
-      return { needsTruncate: false, truncatedBody: full };
-    }
+    return { needsTruncate: false, truncatedBody: full };
   }
 
   const cap = Math.min(full.length, maxChars);

@@ -53,14 +53,9 @@ function chatMatchesCustomerSearch(chat: Chat, query: string): boolean {
   return terms.every((term) => haystack.includes(term));
 }
 
-function OnlineIndicator({ status }: { status?: string }) {
-  const colorClass =
-    status === "online"
-      ? "bg-green-500"
-      : status === "away"
-        ? "bg-yellow-400"
-        : "bg-gray-300";
-
+/** Green when the chat session is active (`isChatActive` from API); gray otherwise. */
+function ChatActiveDot({ isChatActive }: { isChatActive?: boolean }) {
+  const colorClass = isChatActive === true ? "bg-green-400" : "bg-gray-300";
   return (
     <span
       className={`absolute bottom-0 right-0 w-2.5 h-2.5 ${colorClass} border-2 border-white rounded-full`}
@@ -136,7 +131,7 @@ export function ChatSidebarSection({
                     src={chat.customer.avatar}
                     size={40}
                   />
-                  <OnlineIndicator status={chat.customer.onlineStatus} />
+                  <ChatActiveDot isChatActive={chat.isChatActive} />
                 </div>
                 <div className="flex-1 min-w-0">
                   <div className="flex justify-between items-baseline mb-0.5">
@@ -147,9 +142,9 @@ export function ChatSidebarSection({
                       {timeLabel}
                     </span>
                   </div>
-                  {/* <p className="text-xs text-gray-500 truncate">
+                  <p className="text-[10px] text-gray-500 truncate">
                     {chat.customer.phone ?? ""}
-                  </p> */}
+                  </p>
                 </div>
               </button>
             );
@@ -213,7 +208,7 @@ export function ChatSidebarSection({
                     src={chat.customer.avatar}
                     size={40}
                   />
-                  <OnlineIndicator status={chat.customer.onlineStatus} />
+                  <ChatActiveDot isChatActive={chat.isChatActive} />
                 </div>
                 <div className="flex-1 min-w-0">
                   <div className="flex justify-between items-baseline mb-0.5">
@@ -226,9 +221,9 @@ export function ChatSidebarSection({
                       </span>
                     )}
                   </div>
-                  {/* <p className="text-xs text-gray-500 truncate">
+                  <p className="text-[10px] text-gray-500 truncate">
                     {chat.customer.phone ?? ""}
-                  </p> */}
+                  </p>
                 </div>
               </button>
             );
