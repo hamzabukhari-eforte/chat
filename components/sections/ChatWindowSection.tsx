@@ -27,6 +27,7 @@ import {
   FaFileCsv,
   FaFileAlt,
 } from "react-icons/fa";
+import { TicketDrawerSection } from "./TicketDrawerSection";
 import { ExpandableMessageText } from "../atoms/ExpandableMessageText";
 import { AvatarWithInitials } from "../atoms/AvatarWithInitials";
 import { MessageSeenTicks } from "../atoms/MessageSeenTicks";
@@ -36,7 +37,10 @@ import {
   isVideoFile,
   voiceClipFileNameForBlob,
 } from "../../lib/chat/fileAttachment";
-import { HiOutlineChatBubbleLeftRight } from "react-icons/hi2";
+import {
+  HiOutlineChatBubbleLeftRight,
+  HiOutlineTicket,
+} from "react-icons/hi2";
 import data from "@emoji-mart/data";
 import Picker from "@emoji-mart/react";
 import { attachmentShouldRenderAsVideo } from "../../lib/chat/attachmentDisplay";
@@ -161,6 +165,7 @@ export function ChatWindowSection({
     string | null
   >(null);
   const [transferAgentSearch, setTransferAgentSearch] = useState("");
+  const [ticketDrawerOpen, setTicketDrawerOpen] = useState(false);
   const [showEmojiPicker, setShowEmojiPicker] = useState(false);
   const [filePreviews, setFilePreviews] = useState<FilePreview[]>([]);
   const [imagePreview, setImagePreview] = useState<{
@@ -454,19 +459,6 @@ export function ChatWindowSection({
           </div>
         </div>
         <div className="flex items-center gap-2">
-          <button
-            type="button"
-            onClick={onToggleCustomerInfo}
-            aria-label="Toggle customer info"
-            className={
-              "w-9 h-9 flex items-center justify-center rounded-lg border transition-colors cursor-pointer " +
-              (showCustomerInfo
-                ? "border-brand-300 bg-brand-50 text-brand-600"
-                : "border-gray-200 text-gray-400 hover:text-brand-600 hover:border-brand-300 hover:bg-brand-50")
-            }
-          >
-            <FiInfo className="w-4 h-4" />
-          </button>
           <div className="relative" ref={transferMenuRef}>
             <button
               type="button"
@@ -475,14 +467,14 @@ export function ChatWindowSection({
               aria-haspopup="menu"
               aria-label="Transfer chat"
               className={
-                "h-9 px-3 flex items-center gap-1.5 rounded-lg border border-gray-200 text-gray-700 text-sm font-medium " +
+                "h-8 px-2 flex items-center gap-1.5 rounded-lg border border-gray-200 text-gray-700 text-xs font-medium " +
                 "hover:border-brand-300 hover:bg-brand-50 hover:text-brand-600 transition-colors cursor-pointer"
               }
             >
               Transfer
               <FiChevronDown
                 className={
-                  "w-4 h-4 shrink-0 transition-transform " +
+                  "w-3 h-3 shrink-0 transition-transform " +
                   (transferMenuOpen ? "rotate-180" : "")
                 }
               />
@@ -516,13 +508,46 @@ export function ChatWindowSection({
           </div>
           <button
             type="button"
+            onClick={() => setTicketDrawerOpen(true)}
+            aria-label="Open ticket"
+            aria-expanded={ticketDrawerOpen}
+            className={
+              "w-8 h-8 flex items-center justify-center rounded-lg border border-gray-200 text-gray-500 transition-colors cursor-pointer " +
+              "hover:text-brand-600 hover:border-brand-300 hover:bg-brand-50 " +
+              (ticketDrawerOpen
+                ? "border-brand-300 bg-brand-50 text-brand-600"
+                : "")
+            }
+          >
+            <HiOutlineTicket className="w-4 h-4" />
+          </button>
+          <button
+            type="button"
+            onClick={onToggleCustomerInfo}
+            aria-label="Toggle customer info"
+            className={
+              "w-8 h-8 flex items-center justify-center rounded-lg border transition-colors cursor-pointer " +
+              (showCustomerInfo
+                ? "border-brand-300 bg-brand-50 text-brand-600"
+                : "border-gray-200 text-gray-400 hover:text-brand-600 hover:border-brand-300 hover:bg-brand-50")
+            }
+          >
+            <FiInfo className="w-4 h-4" />
+          </button>
+          <button
+            type="button"
             onClick={onResolveChat}
-            className="px-4 py-2 bg-red-50 text-red-600 rounded-lg text-sm font-medium hover:bg-red-100 transition-colors cursor-pointer"
+            className="px-2 py-2 bg-red-50 text-red-600 rounded-lg text-xs font-medium hover:bg-red-100 transition-colors cursor-pointer"
           >
             Close Chat
           </button>
         </div>
       </div>
+
+      <TicketDrawerSection
+        open={ticketDrawerOpen}
+        onOpenChange={setTicketDrawerOpen}
+      />
 
       {/* Messages */}
       <div
