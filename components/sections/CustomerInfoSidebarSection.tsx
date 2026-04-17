@@ -1,32 +1,45 @@
 "use client";
 
-import { FiMail, FiPhone, FiClock, FiShoppingCart, FiTag, FiX } from "react-icons/fi";
+import { FiMail, FiPhone, FiTag, FiX } from "react-icons/fi";
 import { AvatarWithInitials } from "../atoms/AvatarWithInitials";
-import type { User } from "../../lib/chat/types";
+import type { CustomerChatTicket, User } from "../../lib/chat/types";
 
 interface Props {
   customer: User | null;
+  /** From `loadConversationById` after the conversation is opened. */
+  ticketList?: CustomerChatTicket[];
+  /**
+   * When true, the main thread already has messages for this chat (conversation was loaded).
+   * Used so we do not show “open this chat” after queue refresh dropped `ticketList` from state.
+   */
+  hasConversationMessages?: boolean;
   onClose: () => void;
 }
 
-interface ActivityItem {
-  id: string;
-  icon: "cart" | "ticket";
-  title: string;
-  date: string;
+function formatTicketRegisteredAt(raw: string): string {
+  const t = raw.trim();
+  if (!t) return "";
+  const normalized = /^\d{4}-\d{2}-\d{2} \d/.test(t) ? t.replace(" ", "T") : t;
+  const d = new Date(normalized);
+  if (Number.isNaN(d.getTime())) return t;
+  return d.toLocaleString(undefined, {
+    year: "numeric",
+    month: "short",
+    day: "numeric",
+    hour: "2-digit",
+    minute: "2-digit",
+  });
 }
 
-const recentActivity: ActivityItem[] = [
-
-  {
-    id: "1",
-    icon: "ticket",
-    title: "Ticket #64803 Closed",
-    date: "Apr 22nd, 2025",
-  },
-];
-
-export function CustomerInfoSidebarSection({ customer, onClose }: Props) {
+export function CustomerInfoSidebarSection({
+  customer,
+  ticketList,
+  hasConversationMessages,
+  onClose,
+}: Props) {
+  const ticketsForDisplay =
+    ticketList ??
+    (hasConversationMessages ? ([] as CustomerChatTicket[]) : undefined);
   // const localTime = new Date().toLocaleTimeString([], {
   //   hour: "numeric",
   //   minute: "2-digit",
@@ -59,20 +72,7 @@ export function CustomerInfoSidebarSection({ customer, onClose }: Props) {
         {/* <p className="text-sm text-gray-500 mb-3">
           {customer?.plan ?? "Standard Plan"}
         </p> */}
-        <div className="flex gap-2">
-          <button
-            type="button"
-            className="px-3 py-1.5 bg-white border border-gray-200 rounded text-xs font-medium text-gray-700 hover:bg-gray-50 transition-colors cursor-pointer"
-          >
-            Profile
-          </button>
-          <button
-            type="button"
-            className="px-3 py-1.5 bg-white border border-gray-200 rounded text-xs font-medium text-gray-700 hover:bg-gray-50 transition-colors cursor-pointer"
-          >
-            History
-          </button>
-        </div>
+     
       </div>
 
       {/* Scrollable Content */}
@@ -108,30 +108,40 @@ export function CustomerInfoSidebarSection({ customer, onClose }: Props) {
             Recent Activity
           </h4>
           <div className="space-y-4">
-            {recentActivity.map((activity) => (
-              <div key={activity.id} className="flex gap-3">
-                <div
-                  className={
-                    "w-8 h-8 rounded flex items-center justify-center shrink-0 " +
-                    (activity.icon === "cart"
-                      ? "bg-blue-50"
-                      : "bg-gray-50 border border-gray-100")
-                  }
-                >
-                  {activity.icon === "cart" ? (
-                    <FiShoppingCart className="text-blue-500 w-3.5 h-3.5" />
-                  ) : (
-                    <FiTag className="text-gray-500 w-3.5 h-3.5" />
-                  )}
+            {ticketsForDisplay === undefined ? (
+              <p className="text-xs text-gray-500">
+                Open this chat to load ticket history from the server.
+              </p>
+            ) : ticketsForDisplay.length === 0 ? (
+              <p className="text-xs text-gray-500">No tickets for this conversation.</p>
+            ) : (
+              ticketsForDisplay.map((t) => (
+                <div key={t.ticketNo} className="flex gap-3">
+                  <div className="flex h-8 w-8 shrink-0 items-center justify-center rounded border border-gray-100 bg-gray-50">
+                    <FiTag className="h-3.5 w-3.5 text-gray-500" aria-hidden />
+                  </div>
+                  <div className="min-w-0 flex-1">
+                    <p
+                      className="truncate text-sm font-medium text-gray-800"
+                      title={t.ticketNo}
+                    >
+                      {t.ticketNo}
+                    </p>
+                    <p className="mt-0.5 text-xs text-gray-500">
+                      <span className="font-medium text-gray-600">
+                        {t.ticketStatus}
+                      </span>
+                  
+                    </p>
+                    {t.ticketRegisteredAt ? (
+                        <p className="text-xs text-gray-500">
+                          <span>{formatTicketRegisteredAt(t.ticketRegisteredAt)}</span>
+                        </p>
+                      ) : null}
+                  </div>
                 </div>
-                <div>
-                  <p className="text-sm text-gray-800 font-medium">
-                    {activity.title}
-                  </p>
-                  <p className="text-xs text-gray-500 mt-0.5">{activity.date}</p>
-                </div>
-              </div>
-            ))}
+              ))
+            )}
           </div>
         </div>
       </div>

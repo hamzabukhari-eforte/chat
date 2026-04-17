@@ -143,7 +143,7 @@ export function ChatSidebarSection({
                     </span>
                   </div>
                   <p className="text-[10px] text-gray-500 truncate">
-                    {chat.customer.phone ?? ""}
+                    {chat.lastAssignedAgent ?? ""}
                   </p>
                 </div>
               </button>

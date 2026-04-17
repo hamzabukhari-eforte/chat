@@ -4,6 +4,13 @@ export type ChatStatus = "queued" | "assigned" | "resolved";
 
 export type OnlineStatus = "online" | "away" | "offline";
 
+/** Row from SES `loadConversationById` → `ticketList`. */
+export interface CustomerChatTicket {
+  ticketNo: string;
+  ticketStatus: string;
+  ticketRegisteredAt: string;
+}
+
 export interface User {
   id: string;
   name: string;
@@ -31,6 +38,10 @@ export interface Chat {
   whatsappChatIndex?: string | number;
   /** When known (queue API / loadConversation), drives sidebar status dot: active = green. */
   isChatActive?: boolean;
+  /** From queue API when present — last agent who had this conversation. */
+  lastAssignedAgent?: string;
+  /** Populated after `loadConversationById` when the API includes `ticketList`. */
+  ticketList?: CustomerChatTicket[];
 }
 
 export interface Attachment {

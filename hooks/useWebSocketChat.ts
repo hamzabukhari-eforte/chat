@@ -21,7 +21,14 @@ import {
   binaryChunkCountForFileSize,
   FILE_CHUNK_SIZE_BYTES,
 } from "../lib/chat/fileChunks";
-import type { Attachment, Chat, Message, Role, User } from "../lib/chat/types";
+import type {
+  Attachment,
+  Chat,
+  CustomerChatTicket,
+  Message,
+  Role,
+  User,
+} from "../lib/chat/types";
 import { ChatWebSocketClient } from "../lib/websocket/client";
 import { toast } from "sonner";
 
@@ -152,6 +159,7 @@ interface QueueNAssignedRow {
   email: string;
   counts?: number;
   isChatActive?: boolean;
+  lastAssignedAgent?: string | null;
 }
 
 interface QueueNAssignedChatsResponse {
@@ -160,6 +168,12 @@ interface QueueNAssignedChatsResponse {
   userId?: string;
   /** Agent id (numeric string) → display name. */
   userList?: Record<string, string | number>;
+  /** Domain id (numeric string) → label for ticket / routing UI. */
+  domainList?: Record<string, string | number>;
+  /** Email template id (numeric string) → template name. */
+  emailTemplates?: Record<string, string | number>;
+  /** SMS template id (numeric string) → template name. */
+  smsTemplates?: Record<string, string | number>;
   queueChats: QueueNAssignedRow[];
   queueCount: number;
   assignedCount: number;
@@ -176,6 +190,7 @@ const QUEUE_RESPONSE_STRUCTURE_KEYS = new Set([
   "chatFrom",
   "userId",
   "userList",
+  "domainList",
 ]);
 
 function parseNumericIdAgentMap(
@@ -231,6 +246,37 @@ function extractTransferAgentsFromQueueResponse(
   }
   out.sort((a, b) => a.name.localeCompare(b.name, undefined, { sensitivity: "base" }));
   return out;
+}
+
+/** `getQueueNAssignedChats` → `domainList` (numeric id → domain name). */
+function extractTicketDomainsFromQueueResponse(
+  data: unknown,
+): { id: string; name: string }[] {
+  if (!data || typeof data !== "object" || Array.isArray(data)) return [];
+  const raw = (data as Record<string, unknown>).domainList;
+  const rows = parseNumericIdAgentMap(raw);
+  rows.sort((a, b) => Number(a.id) - Number(b.id));
+  return rows;
+}
+
+function extractTicketEmailTemplatesFromQueueResponse(
+  data: unknown,
+): { id: string; name: string }[] {
+  if (!data || typeof data !== "object" || Array.isArray(data)) return [];
+  const raw = (data as Record<string, unknown>).emailTemplates;
+  const rows = parseNumericIdAgentMap(raw);
+  rows.sort((a, b) => Number(a.id) - Number(b.id));
+  return rows;
+}
+
+function extractTicketSmsTemplatesFromQueueResponse(
+  data: unknown,
+): { id: string; name: string }[] {
+  if (!data || typeof data !== "object" || Array.isArray(data)) return [];
+  const raw = (data as Record<string, unknown>).smsTemplates;
+  const rows = parseNumericIdAgentMap(raw);
+  rows.sort((a, b) => Number(a.id) - Number(b.id));
+  return rows;
 }
 
 interface BackendWsInitializer {
@@ -302,6 +348,12 @@ function mapQueueRowToChat(
     };
   }
 
+  const lastAssignedRaw = row.lastAssignedAgent;
+  const lastAssignedAgent =
+    lastAssignedRaw != null && String(lastAssignedRaw).trim() !== ""
+      ? String(lastAssignedRaw).trim()
+      : undefined;
+
   return {
     id,
     customer,
@@ -317,6 +369,7 @@ function mapQueueRowToChat(
     isChatActive: parseOptionalIsChatActive(
       (row as unknown as { isChatActive?: unknown }).isChatActive,
     ),
+    lastAssignedAgent,
   };
 }
 
@@ -347,6 +400,9 @@ function mapNewChatInQueueDataToChat(data: Record<string, unknown>): Chat | null
     chatIndex,
     email: String(data.email ?? ""),
     isChatActive: parseOptionalIsChatActive(data.isChatActive),
+    lastAssignedAgent: nullifyDash(
+      data.lastAssignedAgent ?? data.lastAssignedAgentName,
+    ),
   };
   return mapQueueRowToChat(row, "queued");
 }
@@ -538,6 +594,56 @@ function extractIsChatActive(json: unknown): boolean | null {
   return null;
 }
 
+function parseTicketListRows(raw: unknown[]): CustomerChatTicket[] {
+  const out: CustomerChatTicket[] = [];
+  for (const item of raw) {
+    if (!item || typeof item !== "object") continue;
+    const o = item as Record<string, unknown>;
+    const ticketNo = String(o.ticketNo ?? o.TicketNo ?? "").trim();
+    const ticketStatus = String(
+      o.ticketStatus ?? o.TicketStatus ?? "",
+    ).trim();
+    const ticketRegisteredAt = String(
+      o.ticketRegisteredAt ?? o.ticket_registered_at ?? "",
+    ).trim();
+    if (!ticketNo && !ticketStatus) continue;
+    out.push({
+      ticketNo: ticketNo || "—",
+      ticketStatus: ticketStatus || "—",
+      ticketRegisteredAt,
+    });
+  }
+  return out;
+}
+
+function extractTicketList(json: unknown): CustomerChatTicket[] {
+  if (!json || typeof json !== "object" || Array.isArray(json)) return [];
+  const root = json as Record<string, unknown>;
+
+  const tryKey = (o: Record<string, unknown>): CustomerChatTicket[] | null => {
+    const raw = o.ticketList ?? o.TicketList;
+    if (!Array.isArray(raw)) return null;
+    return parseTicketListRows(raw);
+  };
+
+  const fromRoot = tryKey(root);
+  if (fromRoot !== null) return fromRoot;
+
+  const data = root.data;
+  if (data && typeof data === "object" && !Array.isArray(data)) {
+    const nested = tryKey(data as Record<string, unknown>);
+    if (nested !== null) return nested;
+  }
+
+  const result = root.result;
+  if (result && typeof result === "object" && !Array.isArray(result)) {
+    const nested = tryKey(result as Record<string, unknown>);
+    if (nested !== null) return nested;
+  }
+
+  return [];
+}
+
 /** For queue row / chat mapping: set `Chat.isChatActive` only when the API sends a value. */
 function parseOptionalIsChatActive(raw: unknown): boolean | undefined {
   if (raw === undefined || raw === null) return undefined;
@@ -556,6 +662,7 @@ async function fetchConversationByChatIndex(
   sessionStatus: number | null;
   isChatActive: boolean | null;
   messages: Message[];
+  ticketList: CustomerChatTicket[];
 }> {
   const url = new URL(getLoadConversationUrl());
   url.searchParams.set("Userid", agentUserId);
@@ -571,13 +678,14 @@ async function fetchConversationByChatIndex(
   const json: unknown = await res.json();
   const sessionStatus = extractSessionStatus(json);
   const isChatActive = extractIsChatActive(json);
+  const ticketList = extractTicketList(json);
   const messages = parseLoadConversationMessages(
     json,
     chatId,
     agentUserId,
     customerId,
   );
-  return { sessionStatus, isChatActive, messages };
+  return { sessionStatus, isChatActive, messages, ticketList };
 }
 
 /** SES `chatIndex` for APIs: prefer row index, else `chat.id` (also derived from chatIndex). */
@@ -616,6 +724,9 @@ async function fetchQueueAndAssignedChats(agent: User): Promise<{
   domainIndex: number | null;
   chatFrom: number | null;
   transferAgents: { id: string; name: string }[];
+  ticketDomains: { id: string; name: string }[];
+  ticketEmailTemplates: { id: string; name: string }[];
+  ticketSmsTemplates: { id: string; name: string }[];
 }> {
   const url = new URL(getQueueChatsUrl());
   if (shouldSendUserIdInParams()) {
@@ -632,6 +743,9 @@ async function fetchQueueAndAssignedChats(agent: User): Promise<{
   const raw: unknown = await res.json();
   const data = raw as QueueNAssignedChatsResponse;
   const transferAgents = extractTransferAgentsFromQueueResponse(raw);
+  const ticketDomains = extractTicketDomainsFromQueueResponse(raw);
+  const ticketEmailTemplates = extractTicketEmailTemplatesFromQueueResponse(raw);
+  const ticketSmsTemplates = extractTicketSmsTemplatesFromQueueResponse(raw);
   const queue = (data.queueChats ?? []).map((r) =>
     mapQueueRowToChat(r, "queued"),
   );
@@ -657,6 +771,9 @@ async function fetchQueueAndAssignedChats(agent: User): Promise<{
       data.domainIndex !== undefined ? Number(data.domainIndex) : null,
     chatFrom: data.chatFrom !== undefined ? Number(data.chatFrom) : null,
     transferAgents,
+    ticketDomains,
+    ticketEmailTemplates,
+    ticketSmsTemplates,
   };
 }
 
@@ -782,6 +899,12 @@ interface State {
   chatFrom: number | null;
   /** Agent id → display name from getQueueNAssignedChats `userList` (or legacy top-level numeric keys). */
   transferAgents: { id: string; name: string }[];
+  /** Domain id → label from `getQueueNAssignedChats` `domainList` (ticket panel). */
+  ticketDomains: { id: string; name: string }[];
+  /** Email templates from `getQueueNAssignedChats` `emailTemplates`. */
+  ticketEmailTemplates: { id: string; name: string }[];
+  /** SMS templates from `getQueueNAssignedChats` `smsTemplates`. */
+  ticketSmsTemplates: { id: string; name: string }[];
   /** `CHAT_SEEN` can arrive before `NEW_MESSAGE`; apply when a message with that `id` appears. */
   pendingSeenByMsgId: Record<string, 3 | 4>;
 }
@@ -793,6 +916,9 @@ const initialState: State = {
   domainIndex: null,
   chatFrom: null,
   transferAgents: [],
+  ticketDomains: [],
+  ticketEmailTemplates: [],
+  ticketSmsTemplates: [],
   pendingSeenByMsgId: {},
 };
 
@@ -811,7 +937,18 @@ function applyPendingSeenToMessage(
 function mergeChatsById(prev: Chat[], incoming: Chat[]): Chat[] {
   const map = new Map<string, Chat>();
   prev.forEach((c) => map.set(c.id, c));
-  incoming.forEach((c) => map.set(c.id, c));
+  incoming.forEach((c) => {
+    const existing = map.get(c.id);
+    if (
+      existing &&
+      c.ticketList === undefined &&
+      existing.ticketList !== undefined
+    ) {
+      map.set(c.id, { ...c, ticketList: existing.ticketList });
+    } else {
+      map.set(c.id, c);
+    }
+  });
   return Array.from(map.values());
 }
 
@@ -1092,6 +1229,9 @@ export function useWebSocketChat(currentUser: User | null) {
                     domainIndex: result.domainIndex ?? prev.domainIndex,
                     chatFrom: result.chatFrom ?? prev.chatFrom,
                     transferAgents: result.transferAgents,
+                    ticketDomains: result.ticketDomains,
+                    ticketEmailTemplates: result.ticketEmailTemplates,
+                    ticketSmsTemplates: result.ticketSmsTemplates,
                   };
                 }
                 transferToastDedupRef.current[notifyAssignedChatId] = nowMs;
@@ -1115,6 +1255,9 @@ export function useWebSocketChat(currentUser: User | null) {
               domainIndex: result.domainIndex ?? prev.domainIndex,
               chatFrom: result.chatFrom ?? prev.chatFrom,
               transferAgents: result.transferAgents,
+              ticketDomains: result.ticketDomains,
+              ticketEmailTemplates: result.ticketEmailTemplates,
+              ticketSmsTemplates: result.ticketSmsTemplates,
             };
           });
         })
@@ -1965,7 +2108,7 @@ export function useWebSocketChat(currentUser: User | null) {
       }
 
       try {
-        const { sessionStatus, isChatActive, messages } =
+        const { sessionStatus, isChatActive, messages, ticketList } =
           await fetchConversationByChatIndex(
             chatIndex,
             chatId,
@@ -2005,7 +2148,9 @@ export function useWebSocketChat(currentUser: User | null) {
             ...prev,
             activeChatId: chatId,
             chats: prev.chats.map((c) =>
-              c.id === chatId ? { ...c, ...chatActivePatch } : c,
+              c.id === chatId
+                ? { ...c, ...chatActivePatch, ticketList }
+                : c,
             ),
             messages: [
               ...prev.messages.filter((m) => m.chatId !== chatId),
@@ -2037,6 +2182,9 @@ export function useWebSocketChat(currentUser: User | null) {
     activeMessages,
     activeChatId: state.activeChatId,
     transferAgents: state.transferAgents,
+    ticketDomains: state.ticketDomains,
+    ticketEmailTemplates: state.ticketEmailTemplates,
+    ticketSmsTemplates: state.ticketSmsTemplates,
     startChat,
     claimChat,
     sendMessage,
