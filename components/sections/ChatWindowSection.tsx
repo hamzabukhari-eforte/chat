@@ -71,6 +71,14 @@ interface Props {
   onTransferToAgent?: (agentId: string, agentName: string) => void;
   /** From getQueueNAssignedChats `userList` (id → name). */
   transferAgents?: { id: string; name: string }[];
+  /** From getQueueNAssignedChats `domainList` (id → label). */
+  ticketDomains?: { id: string; name: string }[];
+  /** From getQueueNAssignedChats `emailTemplates` (id → label). */
+  ticketEmailTemplates?: { id: string; name: string }[];
+  /** From getQueueNAssignedChats `smsTemplates` (id → label). */
+  ticketSmsTemplates?: { id: string; name: string }[];
+  /** Logged-in agent id for ticket / SES register-complaint calls. */
+  agentUserId: string;
 }
 
 const ACCEPTED_IMAGE_TYPES = "image/jpeg,image/png,image/gif,image/webp";
@@ -155,6 +163,10 @@ export function ChatWindowSection({
   onTransferToQueue,
   onTransferToAgent,
   transferAgents = [],
+  ticketDomains = [],
+  ticketEmailTemplates = [],
+  ticketSmsTemplates = [],
+  agentUserId,
 }: Props) {
   const [draft, setDraft] = useState("");
   const [transferMenuOpen, setTransferMenuOpen] = useState(false);
@@ -166,6 +178,7 @@ export function ChatWindowSection({
   >(null);
   const [transferAgentSearch, setTransferAgentSearch] = useState("");
   const [ticketDrawerOpen, setTicketDrawerOpen] = useState(false);
+  const [closeChatConfirmOpen, setCloseChatConfirmOpen] = useState(false);
   const [showEmojiPicker, setShowEmojiPicker] = useState(false);
   const [filePreviews, setFilePreviews] = useState<FilePreview[]>([]);
   const [imagePreview, setImagePreview] = useState<{
@@ -194,7 +207,8 @@ export function ChatWindowSection({
     if (
       !transferQueueConfirmOpen &&
       !transferAgentModalOpen &&
-      !transferMenuOpen
+      !transferMenuOpen &&
+      !closeChatConfirmOpen
     ) {
       return;
     }
@@ -203,11 +217,21 @@ export function ChatWindowSection({
         setTransferMenuOpen(false);
         setTransferQueueConfirmOpen(false);
         setTransferAgentModalOpen(false);
+        setCloseChatConfirmOpen(false);
       }
     };
     document.addEventListener("keydown", onKeyDown);
     return () => document.removeEventListener("keydown", onKeyDown);
-  }, [transferQueueConfirmOpen, transferAgentModalOpen, transferMenuOpen]);
+  }, [
+    transferQueueConfirmOpen,
+    transferAgentModalOpen,
+    transferMenuOpen,
+    closeChatConfirmOpen,
+  ]);
+
+  useEffect(() => {
+    setCloseChatConfirmOpen(false);
+  }, [activeChat?.id]);
 
   useEffect(() => {
     if (!transferAgentModalOpen) setTransferAgentSearch("");
@@ -263,6 +287,11 @@ export function ChatWindowSection({
     } else {
       toast.success(`Transfer to ${agent.name} (demo).`);
     }
+  };
+
+  const confirmCloseChat = () => {
+    setCloseChatConfirmOpen(false);
+    onResolveChat();
   };
 
   const messagesTailKey = useMemo(() => {
@@ -443,21 +472,38 @@ export function ChatWindowSection({
       {/* Header */}
       <div className="p-4 border-b border-gray-200 flex items-center justify-between shrink-0">
         <div className="flex items-center gap-3">
-          <AvatarWithInitials
-            name={customerName}
-            src={activeChat.customer.avatar}
-            size={40}
-            alt={customerName}
-          />
-          <div>
-            <h3 className="text-sm font-semibold text-gray-900">
-              {customerName}
-            </h3>
-            {/* <p className="text-xs text-gray-500">
+
+          <div className="flex items-center gap-3">
+            <AvatarWithInitials
+              name={customerName}
+              src={activeChat.customer.avatar}
+              size={40}
+              alt={customerName}
+            />
+            <div>
+              <h3 className="text-sm font-semibold text-gray-900">
+                {customerName}
+              </h3>
+              {/* <p className="text-xs text-gray-500">
               {getOnlineStatusText(activeChat.customer.onlineStatus)}
             </p> */}
+            </div>
           </div>
+          <button
+            type="button"
+            onClick={onToggleCustomerInfo}
+            aria-label="Toggle customer info"
+            className={
+              "w-5 h-5 flex items-center justify-center transition-colors cursor-pointer " +
+              (showCustomerInfo
+                ? "text-brand-600"
+                : "text-gray-400 hover:text-brand-600")
+            }
+          >
+            <FiInfo className="w-4 h-4" />
+          </button>
         </div>
+
         <div className="flex items-center gap-2">
           <div className="relative" ref={transferMenuRef}>
             <button
@@ -512,31 +558,17 @@ export function ChatWindowSection({
             aria-label="Open ticket"
             aria-expanded={ticketDrawerOpen}
             className={
-              "w-8 h-8 flex items-center justify-center rounded-lg border border-gray-200 text-gray-500 transition-colors cursor-pointer " +
-              "hover:text-brand-600 hover:border-brand-300 hover:bg-brand-50 " +
-              (ticketDrawerOpen
-                ? "border-brand-300 bg-brand-50 text-brand-600"
-                : "")
+              "h-8 px-4 flex items-center gap-1.5 rounded-lg border border-gray-200 text-gray-700 text-xs font-medium " +
+              "hover:border-brand-300 hover:bg-brand-50 hover:text-brand-600 transition-colors cursor-pointer"
             }
           >
-            <HiOutlineTicket className="w-4 h-4" />
+            {/* <HiOutlineTicket className="w-4 h-4" /> */}
+            Ticket
           </button>
+
           <button
             type="button"
-            onClick={onToggleCustomerInfo}
-            aria-label="Toggle customer info"
-            className={
-              "w-8 h-8 flex items-center justify-center rounded-lg border transition-colors cursor-pointer " +
-              (showCustomerInfo
-                ? "border-brand-300 bg-brand-50 text-brand-600"
-                : "border-gray-200 text-gray-400 hover:text-brand-600 hover:border-brand-300 hover:bg-brand-50")
-            }
-          >
-            <FiInfo className="w-4 h-4" />
-          </button>
-          <button
-            type="button"
-            onClick={onResolveChat}
+            onClick={() => setCloseChatConfirmOpen(true)}
             className="px-2 py-2 bg-red-50 text-red-600 rounded-lg text-xs font-medium hover:bg-red-100 transition-colors cursor-pointer"
           >
             Close Chat
@@ -547,6 +579,11 @@ export function ChatWindowSection({
       <TicketDrawerSection
         open={ticketDrawerOpen}
         onOpenChange={setTicketDrawerOpen}
+        agentUserId={agentUserId}
+        domainOptions={ticketDomains}
+        emailTemplateOptions={ticketEmailTemplates}
+        smsTemplateOptions={ticketSmsTemplates}
+        chatIndex={activeChat.whatsappChatIndex ?? activeChat.id}
       />
 
       {/* Messages */}
@@ -563,9 +600,9 @@ export function ChatWindowSection({
           );
           const prevGroupKey = prevMessage
             ? messageGroupKeyFromHeader(
-                prevMessage.messageHeader,
-                prevMessage.createdAt,
-              )
+              prevMessage.messageHeader,
+              prevMessage.createdAt,
+            )
             : null;
           const shouldShowDate =
             !prevMessage || groupKey !== prevGroupKey;
@@ -873,6 +910,48 @@ export function ChatWindowSection({
         </div>
       ) : null}
 
+      {/* Close chat — confirmation */}
+      {closeChatConfirmOpen ? (
+        <div
+          className="fixed inset-0 z-[60] flex items-center justify-center bg-black/50 p-4"
+          role="dialog"
+          aria-modal="true"
+          aria-labelledby="close-chat-title"
+          onMouseDown={(e) => {
+            if (e.currentTarget === e.target) setCloseChatConfirmOpen(false);
+          }}
+        >
+          <div className="w-full max-w-md rounded-xl bg-white p-6 shadow-xl">
+            <h2
+              id="close-chat-title"
+              className="text-lg font-semibold text-gray-900"
+            >
+              Close this chat?
+            </h2>
+            <p className="mt-2 text-sm text-gray-600">
+              The conversation will end for the customer. You can cancel if you
+              still need to send a message or transfer the chat instead.
+            </p>
+            <div className="mt-6 flex justify-end gap-2">
+              <button
+                type="button"
+                onClick={() => setCloseChatConfirmOpen(false)}
+                className="px-4 py-2 rounded-lg border border-gray-200 text-sm font-medium text-gray-700 hover:bg-gray-50 transition-colors cursor-pointer"
+              >
+                Cancel
+              </button>
+              <button
+                type="button"
+                onClick={confirmCloseChat}
+                className="px-4 py-2 rounded-lg bg-red-600 text-white text-sm font-medium hover:bg-red-700 transition-colors cursor-pointer"
+              >
+                Yes, close chat
+              </button>
+            </div>
+          </div>
+        </div>
+      ) : null}
+
       {/* Transfer to agent — pick agent */}
       {transferAgentModalOpen ? (
         <div
@@ -1027,7 +1106,7 @@ export function ChatWindowSection({
                     <FiFile className="w-5 h-5 text-gray-400" />
                   </div>
                 )}
-                
+
                 <div className="flex-1 min-w-0">
                   <p className="text-xs font-medium text-gray-700 truncate max-w-[120px]">
                     {fp.file.name}

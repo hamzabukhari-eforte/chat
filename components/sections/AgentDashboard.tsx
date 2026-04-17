@@ -73,6 +73,10 @@ export function AgentDashboard() {
             onToggleCustomerInfo={() => setShowCustomerInfo((prev) => !prev)}
             showCustomerInfo={showCustomerInfo}
             transferAgents={chat.transferAgents}
+            ticketDomains={chat.ticketDomains}
+            ticketEmailTemplates={chat.ticketEmailTemplates}
+            ticketSmsTemplates={chat.ticketSmsTemplates}
+            agentUserId={STATIC_AGENT.id}
             onTransferToQueue={chat.transferToQueue}
             onTransferToAgent={chat.transferToAgent}
           />
@@ -87,6 +91,10 @@ export function AgentDashboard() {
               >
                 <CustomerInfoSidebarSection
                   customer={chat.activeChat?.customer ?? null}
+                  ticketList={chat.activeChat?.ticketList}
+                  hasConversationMessages={
+                    Boolean(chat.activeChatId) && chat.activeMessages.length > 0
+                  }
                   onClose={() => setShowCustomerInfo(false)}
                 />
               </motion.div>
