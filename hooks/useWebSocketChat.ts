@@ -160,6 +160,7 @@ interface QueueNAssignedRow {
   counts?: number;
   isChatActive?: boolean;
   lastAssignedAgent?: string | null;
+  lastChatTime?: string;
 }
 
 interface QueueNAssignedChatsResponse {
@@ -354,6 +355,8 @@ function mapQueueRowToChat(
       ? String(lastAssignedRaw).trim()
       : undefined;
 
+  const lastChatTimeRaw = String(row.lastChatTime ?? "").trim();
+
   return {
     id,
     customer,
@@ -370,6 +373,7 @@ function mapQueueRowToChat(
       (row as unknown as { isChatActive?: unknown }).isChatActive,
     ),
     lastAssignedAgent,
+    ...(lastChatTimeRaw !== "" ? { lastChatTime: lastChatTimeRaw } : {}),
   };
 }
 
@@ -403,6 +407,7 @@ function mapNewChatInQueueDataToChat(data: Record<string, unknown>): Chat | null
     lastAssignedAgent: nullifyDash(
       data.lastAssignedAgent ?? data.lastAssignedAgentName,
     ),
+    ...(lastChatTime !== "" ? { lastChatTime } : {}),
   };
   return mapQueueRowToChat(row, "queued");
 }

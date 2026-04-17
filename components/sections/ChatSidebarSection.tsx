@@ -123,7 +123,7 @@ export function ChatSidebarSection({
                 key={chat.id}
                 type="button"
                 onClick={() => onClaimChat(chat.id)}
-                className="w-full text-left flex items-start gap-3 p-3 rounded-lg hover:bg-gray-50 cursor-pointer border border-transparent mb-1 transition-colors"
+                className={`w-full text-left flex gap-3 p-3 rounded-lg hover:bg-gray-50 cursor-pointer border border-transparent mb-1 transition-colors ${chat.lastAssignedAgent && chat.lastChatTime ? "items-center" : "items-start"}`}
               >
                 <div className="relative shrink-0">
                   <AvatarWithInitials
@@ -142,10 +142,16 @@ export function ChatSidebarSection({
                       {timeLabel}
                     </span>
                   </div>
-                  <p className="text-[10px] text-gray-500 truncate">
-                    {chat.lastAssignedAgent ?? ""}
-                  </p>
-                </div>
+                  {chat.lastAssignedAgent && chat.lastChatTime && <div>
+                    <p className="text-[10px] text-gray-600 truncate">
+                      Last assigned to: <span className="font-medium text-gray-700"> {chat.lastAssignedAgent ?? ""}</span>
+                    </p>
+                    <p className="text-[10px] text-gray-600 truncate">
+                      Last chat time: <span className="font-medium text-gray-700"> {chat.lastChatTime}</span>
+                    </p>
+                  </div>
+                  } </div>
+
               </button>
             );
           })}

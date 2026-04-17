@@ -40,6 +40,8 @@ export interface Chat {
   isChatActive?: boolean;
   /** From queue API when present — last agent who had this conversation. */
   lastAssignedAgent?: string;
+  /** From queue API / `NEW_CHAT_IN_QUEUE` when present (e.g. last activity time label). */
+  lastChatTime?: string;
   /** Populated after `loadConversationById` when the API includes `ticketList`. */
   ticketList?: CustomerChatTicket[];
 }
