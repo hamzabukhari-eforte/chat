@@ -1,6 +1,6 @@
 "use client";
 
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { AnimatePresence, motion } from "framer-motion";
 import { useWebSocketChat } from "../../hooks/useWebSocketChat";
 import {
@@ -48,6 +48,12 @@ export function AgentDashboard() {
   const [activeChannel, setActiveChannel] = useState<ChannelId>("webchat");
 
   const chat = useWebSocketChat(STATIC_AGENT);
+
+  useEffect(() => {
+    if (!chat.activeChatId || !chat.activeChat) {
+      setShowCustomerInfo(false);
+    }
+  }, [chat.activeChatId, chat.activeChat?.id]);
 
   return (
     <div className="flex h-full min-h-0 w-full flex-1 overflow-hidden">
