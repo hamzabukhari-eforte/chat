@@ -63,6 +63,47 @@ function parseJsonResponseBody(text: string, status: number): unknown {
   }
 }
 
+/**
+ * Best-effort user-facing string from `generatecomplaint/view` `savedata` JSON
+ * (e.g. `{ message: "…" }`, `{ Data: { Message: "…" } }`).
+ */
+export function messageFromComplaintSavedataResponse(data: unknown): string {
+  const walk = (value: unknown, depth: number): string => {
+    if (depth > 4 || value == null) return "";
+    if (typeof value === "string") {
+      const t = value.trim();
+      return t;
+    }
+    if (typeof value !== "object" || Array.isArray(value)) return "";
+    const o = value as Record<string, unknown>;
+    const keyCandidates = [
+      "message",
+      "Message",
+      "msg",
+      "Msg",
+      "statusMessage",
+      "description",
+      "Description",
+      "messageText",
+      "MessageText",
+    ];
+    for (const k of keyCandidates) {
+      const v = o[k];
+      if (typeof v === "string" && v.trim()) return v.trim();
+    }
+    const nestedKeys = ["data", "Data", "result", "Result", "payload", "Payload"];
+    for (const nk of nestedKeys) {
+      const inner = o[nk];
+      if (inner != null && typeof inner === "object") {
+        const found = walk(inner, depth + 1);
+        if (found) return found;
+      }
+    }
+    return "";
+  };
+  return walk(data, 0);
+}
+
 export async function postRegisterComplaintView(body: {
   action: string;
   domainId?: string | number;

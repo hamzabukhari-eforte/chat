@@ -9,6 +9,8 @@ export interface CustomerChatTicket {
   ticketNo: string;
   ticketStatus: string;
   ticketRegisteredAt: string;
+  complaintType: string;
+  complaintSubType: string;
 }
 
 export interface User {
@@ -24,6 +26,14 @@ export interface User {
   plan?: string;
   onlineStatus?: OnlineStatus;
 }
+
+/** Row in transfer-to-agent list (from `getQueueNAssignedChats` `userList`). */
+export type TransferAgentOption = {
+  id: string;
+  name: string;
+  /** From array `userList` entries — green dot in transfer modal when logged in. */
+  isLoggedIn?: boolean;
+};
 
 export interface Chat {
   id: string;

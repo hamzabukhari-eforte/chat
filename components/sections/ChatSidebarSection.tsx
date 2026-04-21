@@ -102,7 +102,7 @@ export function ChatSidebarSection({
             <FiSearch className="absolute left-3 top-1/2 -translate-y-1/2 text-gray-400 w-3.5 h-3.5" />
             <input
               type="text"
-              placeholder="Name, email, phone, city, country…"
+              placeholder="Search by name, email, phone…"
               value={queueSearch}
               onChange={(e) => setQueueSearch(e.target.value)}
               className="w-full pl-8 pr-3 py-2 bg-gray-50 border border-gray-200 rounded-md text-sm focus:outline-none focus:ring-1 focus:ring-brand-500 focus:border-brand-500"
@@ -131,7 +131,7 @@ export function ChatSidebarSection({
                     src={chat.customer.avatar}
                     size={40}
                   />
-                  <ChatActiveDot isChatActive={chat.isChatActive} />
+                  {/* <ChatActiveDot isChatActive={chat.isChatActive} /> */}
                 </div>
                 <div className="flex-1 min-w-0">
                   <div className="flex justify-between items-baseline mb-0.5">
@@ -179,7 +179,7 @@ export function ChatSidebarSection({
             <FiSearch className="absolute left-3 top-1/2 -translate-y-1/2 text-gray-400 w-3.5 h-3.5" />
             <input
               type="text"
-              placeholder="Name, email, phone, city, country…"
+              placeholder="Search by name, email, phone…"
               value={myChatsSearch}
               onChange={(e) => setMyChatsSearch(e.target.value)}
               className="w-full pl-8 pr-3 py-2 bg-gray-50 border border-gray-200 rounded-md text-sm focus:outline-none focus:ring-1 focus:ring-brand-500 focus:border-brand-500"
@@ -214,7 +214,7 @@ export function ChatSidebarSection({
                     src={chat.customer.avatar}
                     size={40}
                   />
-                  <ChatActiveDot isChatActive={chat.isChatActive} />
+                  {/* <ChatActiveDot isChatActive={chat.isChatActive} /> */}
                 </div>
                 <div className="flex-1 min-w-0">
                   <div className="flex justify-between items-baseline mb-0.5">

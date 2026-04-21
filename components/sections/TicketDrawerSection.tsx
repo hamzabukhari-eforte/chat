@@ -19,6 +19,7 @@ import type { RegisterComplaintDynamicField } from "@/lib/chat/registerComplaint
 import {
   parseGetDynamicFieldsByDomainResponse,
   parseRegisterComplaintIdNameOptions,
+  messageFromComplaintSavedataResponse,
   postGenerateComplaintViewSavedata,
   postRegisterComplaintView,
 } from "@/lib/chat/registerComplaint";
@@ -470,6 +471,8 @@ function TicketDrawerFormBody({
     if (!fields.complaintNature) missing.push("Complaint nature");
     if (!fields.source) missing.push("Source");
     if (!fields.problemOccurred.trim()) missing.push("Problem occurred");
+    if (!fields.briefDescription.trim()) missing.push("Brief description");
+    if (!fields.detailedDescription.trim()) missing.push("Detailed description");
     if (missing.length) {
       toast.error(`Please complete: ${missing.join(", ")}.`);
       return;
@@ -507,12 +510,16 @@ function TicketDrawerFormBody({
 
     void (async () => {
       try {
-        await postGenerateComplaintViewSavedata(
+        const savedataResponse = await postGenerateComplaintViewSavedata(
           payload,
           attachments.map((a) => a.file),
         );
         clearAttachments();
-        toast.success("Complaint registered successfully.");
+        const apiMessage =
+          messageFromComplaintSavedataResponse(savedataResponse);
+        toast.success(
+          apiMessage || "Complaint registered successfully.",
+        );
         onOpenChange(false);
       } catch (err) {
         toast.error(
@@ -678,10 +685,15 @@ function TicketDrawerFormBody({
                   className="block text-xs font-medium text-gray-700"
                 >
                   Brief Description
+                  <span className="text-red-500" aria-hidden>
+                    {" "}
+                    *
+                  </span>
                 </label>
                 <input
                   id="ticket-brief"
                   type="text"
+                  required
                   value={fields.briefDescription}
                   onChange={(e) =>
                     setField("briefDescription", e.target.value)
@@ -697,10 +709,15 @@ function TicketDrawerFormBody({
                   className="block text-xs font-medium text-gray-700"
                 >
                   Detailed Description
+                  <span className="text-red-500" aria-hidden>
+                    {" "}
+                    *
+                  </span>
                 </label>
                 <textarea
                   id="ticket-detailed"
                   rows={4}
+                  required
                   value={fields.detailedDescription}
                   onChange={(e) =>
                     setField("detailedDescription", e.target.value)

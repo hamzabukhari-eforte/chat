@@ -52,7 +52,12 @@ import {
 } from "../../lib/chat/sesMessageTime";
 import { toast } from "sonner";
 import { useAutoGrowTextarea } from "../../hooks/useAutoGrowTextarea";
-import type { Attachment, Chat, Message } from "../../lib/chat/types";
+import type {
+  Attachment,
+  Chat,
+  Message,
+  TransferAgentOption,
+} from "../../lib/chat/types";
 
 interface Props {
   activeChat: Chat | null;
@@ -70,7 +75,7 @@ interface Props {
   /** Optional — defaults to a demo toast. */
   onTransferToAgent?: (agentId: string, agentName: string) => void;
   /** From getQueueNAssignedChats `userList` (id → name). */
-  transferAgents?: { id: string; name: string }[];
+  transferAgents?: TransferAgentOption[];
   /** From getQueueNAssignedChats `domainList` (id → label). */
   ticketDomains?: { id: string; name: string }[];
   /** From getQueueNAssignedChats `emailTemplates` (id → label). */
@@ -1028,11 +1033,10 @@ export function ChatWindowSection({
                           : "hover:bg-gray-50")
                       }
                     >
-                      <AvatarWithInitials
-                        name={agent.name}
-                        size={36}
-                        alt=""
+                      <span
+                        className={`w-2 h-2 rounded-full ${agent?.isLoggedIn ? "bg-green-500" : "bg-gray-200"}`}
                       />
+
                       <span className="font-medium text-gray-900">
                         {agent.name}
                       </span>

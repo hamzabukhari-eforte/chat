@@ -6,8 +6,10 @@ import type { CustomerChatTicket, User } from "../../lib/chat/types";
 
 interface Props {
   customer: User | null;
-  /** From `loadConversationById` after the conversation is opened. */
+  /** From `loadConversationById` after the conversation is opened, or refreshed via `getTicketListByChatId`. */
   ticketList?: CustomerChatTicket[];
+  /** True while fetching tickets for the open chat (info icon). */
+  ticketsLoading?: boolean;
   /**
    * When true, the main thread already has messages for this chat (conversation was loaded).
    * Used so we do not show “open this chat” after queue refresh dropped `ticketList` from state.
@@ -34,6 +36,7 @@ function formatTicketRegisteredAt(raw: string): string {
 export function CustomerInfoSidebarSection({
   customer,
   ticketList,
+  ticketsLoading = false,
   hasConversationMessages,
   onClose,
 }: Props) {
@@ -66,83 +69,100 @@ export function CustomerInfoSidebarSection({
           className="border-4 border-white shadow-sm mb-3"
           alt={customer?.name ?? "Customer"}
         />
-        <h3 className="font-semibold text-gray-900 mb-3">
+        <h3 className="font-semibold text-gray-900">
           {customer?.name ?? "No customer selected"}
         </h3>
         {/* <p className="text-sm text-gray-500 mb-3">
           {customer?.plan ?? "Standard Plan"}
         </p> */}
-     
+
       </div>
 
-      {/* Scrollable Content */}
-      <div className="flex-1 overflow-y-auto py-5 px-4">
-        {/* About Section */}
-        <div className="mb-6">
-          <h4 className="text-xs font-semibold text-gray-500 uppercase tracking-wider mb-3">
-            About
-          </h4>
-          <ul className="space-y-3 text-sm">
-            <li className="flex items-start gap-3">
-              <FiMail className="text-gray-400 mt-0.5 w-4 h-4 shrink-0" />
-              <span className="text-gray-700 break-all">
-                {customer?.email ?? "customer@email.com"}
-              </span>
-            </li>
-            <li className="flex items-start gap-3">
-              <FiPhone className="text-gray-400 mt-0.5 w-4 h-4 shrink-0" />
-              <span className="text-gray-700">
-                {customer?.phone ?? "0813-0000-0000"}
-              </span>
-            </li>
-            {/* <li className="flex items-start gap-3">
-              <FiClock className="text-gray-400 mt-0.5 w-4 h-4 shrink-0" />
-              <span className="text-gray-700">Local time: {localTime}</span>
-            </li> */}
-          </ul>
-        </div>
+      {/* Non-scrollable About Section */}
+      <div className="shrink-0 px-4 py-5 border-b border-gray-100">
+        <h4 className="text-xs font-semibold text-gray-500 uppercase tracking-wider mb-3">
+          About
+        </h4>
+        <ul className="space-y-3 text-sm">
+          <li className="flex items-start gap-3">
+            <FiMail className="text-gray-400 mt-0.5 w-4 h-4 shrink-0" />
+            <span className="text-gray-700 break-all">
+              {customer?.email ?? "customer@email.com"}
+            </span>
+          </li>
+          <li className="flex items-start gap-3">
+            <FiPhone className="text-gray-400 mt-0.5 w-4 h-4 shrink-0" />
+            <span className="text-gray-700">
+              {customer?.phone ?? "0813-0000-0000"}
+            </span>
+          </li>
+          {/* <li className="flex items-start gap-3">
+            <FiClock className="text-gray-400 mt-0.5 w-4 h-4 shrink-0" />
+            <span className="text-gray-700">Local time: {localTime}</span>
+          </li> */}
+        </ul>
+      </div>
 
-        {/* Recent Activity Section */}
-        <div>
-          <h4 className="text-xs font-semibold text-gray-500 uppercase tracking-wider mb-3">
-            Recent Activity
-          </h4>
-          <div className="space-y-4">
-            {ticketsForDisplay === undefined ? (
-              <p className="text-xs text-gray-500">
-                Open this chat to load ticket history from the server.
-              </p>
-            ) : ticketsForDisplay.length === 0 ? (
-              <p className="text-xs text-gray-500">No tickets for this conversation.</p>
-            ) : (
-              ticketsForDisplay.map((t) => (
-                <div key={t.ticketNo} className="flex gap-3">
-                  <div className="flex h-8 w-8 shrink-0 items-center justify-center rounded border border-gray-100 bg-gray-50">
-                    <FiTag className="h-3.5 w-3.5 text-gray-500" aria-hidden />
-                  </div>
-                  <div className="min-w-0 flex-1">
-                    <p
-                      className="truncate text-sm font-medium text-gray-800"
-                      title={t.ticketNo}
-                    >
-                      {t.ticketNo}
-                    </p>
-                    <p className="mt-0.5 text-xs text-gray-500">
-                      <span className="font-medium text-gray-600">
-                        {t.ticketStatus}
-                      </span>
-                  
-                    </p>
-                    {t.ticketRegisteredAt ? (
-                        <p className="text-xs text-gray-500">
-                          <span>{formatTicketRegisteredAt(t.ticketRegisteredAt)}</span>
-                        </p>
-                      ) : null}
-                  </div>
+      {/* Scrollable Recent Activity Section */}
+        <h4 className="text-xs font-semibold text-gray-500 uppercase tracking-wider mb-3 px-4 pt-2">
+          Recent Activity
+        </h4>
+      <div className="min-h-0 flex-1 overflow-y-auto px-4 py-2">
+        <div className="space-y-4">
+          {ticketsLoading ? (
+            <p className="text-xs text-gray-500">Loading tickets…</p>
+          ) : ticketsForDisplay === undefined ? (
+            <p className="text-xs text-gray-500">
+              Open this chat to load ticket history from the server.
+            </p>
+          ) : ticketsForDisplay.length === 0 ? (
+            <p className="text-xs text-gray-500">No tickets for this conversation.</p>
+          ) : (
+            ticketsForDisplay.map((t) => (
+              <div key={t.ticketNo} className="flex gap-2 border-b border-gray-200 pb-2">
+                <div className="flex h-5 w-5 shrink-0 items-center justify-center rounded border border-gray-100 bg-gray-50">
+                  <FiTag className="h-3 w-3 text-gray-500" aria-hidden />
                 </div>
-              ))
-            )}
-          </div>
+                <div className="min-w-0 flex-1">
+                  <p
+                    className="truncate text-xs text-gray-500"
+                    title={t.ticketNo}
+                  >
+                   
+                    <span className="font-medium text-blue-900">{t.ticketNo}</span>
+                  </p>
+                  <p className="mt-0.5 text-xs text-gray-500">
+                    Status: {" "}
+                    <span className="font-medium text-gray-600">
+                      {t.ticketStatus}
+                    </span>
+                  </p>
+                  {t.complaintType ? (
+                    <p className="mt-0.5 text-xs text-gray-500">
+                      Complaint Type:{" "}
+                      <span className="font-medium text-gray-600">
+                        {t.complaintType}
+                      </span>
+                    </p>
+                  ) : null}
+                  {t.complaintSubType ? (
+                    <p className="mt-0.5 text-xs text-gray-500">
+                      Complaint Sub Type:{" "}
+                      <span className="font-medium text-gray-600">
+                        {t.complaintSubType}
+                      </span>
+                    </p>
+                  ) : null}
+                  {t.ticketRegisteredAt ? (
+                    <p className="text-xs text-gray-500">
+                      Registered at:{" "}
+                      <span className="font-medium text-gray-600">{formatTicketRegisteredAt(t.ticketRegisteredAt)}</span>
+                    </p>
+                  ) : null}
+                </div>
+              </div>
+            ))
+          )}
         </div>
       </div>
     </aside>

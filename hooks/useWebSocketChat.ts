@@ -27,6 +27,7 @@ import type {
   CustomerChatTicket,
   Message,
   Role,
+  TransferAgentOption,
   User,
 } from "../lib/chat/types";
 import { ChatWebSocketClient } from "../lib/websocket/client";
@@ -56,6 +57,8 @@ const DEFAULT_LOAD_CONVERSATION_PATH =
 const DEFAULT_ASSIGN_CHAT_PATH = "/SES/SocialMedia/whatsapp/assignChat";
 const DEFAULT_TRANSFER_CHAT_PATH = "/SES/SocialMedia/whatsapp/transferChat";
 const DEFAULT_CLOSE_CHAT_PATH = "/SES/SocialMedia/whatsapp/closeChat";
+const DEFAULT_TICKET_LIST_BY_CHAT_ID_PATH =
+  "/SES/SocialMedia/whatsapp/getTicketListByChatId";
 const DEFAULT_CHAT_WS_HOST = "10.0.10.53:8080";
 const DEFAULT_CHAT_WS_PATH = "/SES/WebLiveChat";
 
@@ -146,6 +149,18 @@ function getCloseChatUrl(): string {
   ).replace(/\/$/, "");
 }
 
+function getTicketListByChatIdUrl(): string {
+  const fromEnv =
+    typeof process !== "undefined" &&
+    process.env.NEXT_PUBLIC_GET_TICKET_LIST_BY_CHAT_ID_URL?.trim()
+      ? process.env.NEXT_PUBLIC_GET_TICKET_LIST_BY_CHAT_ID_URL.trim()
+      : undefined;
+  return (
+    fromEnv ??
+    `${getDefaultApiOrigin()}${DEFAULT_TICKET_LIST_BY_CHAT_ID_PATH}`
+  ).replace(/\/$/, "");
+}
+
 interface QueueNAssignedRow {
   number: string;
   messageTime: string;
@@ -167,8 +182,11 @@ interface QueueNAssignedChatsResponse {
   domainIndex?: number;
   chatFrom?: number;
   userId?: string;
-  /** Agent id (numeric string) → display name. */
-  userList?: Record<string, string | number>;
+  /**
+   * Agents: either legacy id → name map, or an array of
+   * `{ id, userName, isLoggedIn }` from SES.
+   */
+  userList?: unknown;
   /** Domain id (numeric string) → label for ticket / routing UI. */
   domainList?: Record<string, string | number>;
   /** Email template id (numeric string) → template name. */
@@ -215,20 +233,55 @@ function parseNumericIdAgentMap(
   return out;
 }
 
+/** New SES shape: `userList: [{ id, userName, isLoggedIn }, ...]`. */
+function parseUserListArray(raw: unknown): TransferAgentOption[] {
+  if (!Array.isArray(raw)) return [];
+  const out: TransferAgentOption[] = [];
+  for (const row of raw) {
+    if (!row || typeof row !== "object" || Array.isArray(row)) continue;
+    const r = row as Record<string, unknown>;
+    const idRaw = r.id;
+    const id =
+      typeof idRaw === "number" && Number.isFinite(idRaw)
+        ? String(Math.trunc(idRaw))
+        : typeof idRaw === "string" && /^\d+$/.test(idRaw.trim())
+          ? idRaw.trim()
+          : "";
+    if (!id) continue;
+    const userName = r.userName;
+    const name =
+      typeof userName === "string"
+        ? userName.trim()
+        : typeof userName === "number" && Number.isFinite(userName)
+          ? String(userName)
+          : "";
+    if (!name) continue;
+    out.push({
+      id,
+      name,
+      isLoggedIn: Boolean(r.isLoggedIn),
+    });
+  }
+  out.sort((a, b) => Number(a.id) - Number(b.id));
+  return out;
+}
+
 /**
- * SES returns agents in `userList`, e.g. `{ "1": "Administrator", userList: { "24": "Wajid" }, ... }`.
- * Falls back to legacy top-level numeric keys when `userList` is absent or empty.
+ * SES `userList`: array `{ id, userName, isLoggedIn }[]`, or legacy id → name map, or
+ * legacy top-level numeric keys on the queue payload.
+ * Sorted by numeric user id, same as `domainList` / template maps.
  */
 function extractTransferAgentsFromQueueResponse(
   data: unknown,
-): { id: string; name: string }[] {
+): TransferAgentOption[] {
   if (!data || typeof data !== "object" || Array.isArray(data)) return [];
   const o = data as Record<string, unknown>;
+  const fromArray = parseUserListArray(o.userList);
+  if (fromArray.length > 0) return fromArray;
+
   const fromUserList = parseNumericIdAgentMap(o.userList);
   if (fromUserList.length > 0) {
-    fromUserList.sort((a, b) =>
-      a.name.localeCompare(b.name, undefined, { sensitivity: "base" }),
-    );
+    fromUserList.sort((a, b) => Number(a.id) - Number(b.id));
     return fromUserList;
   }
   const out: { id: string; name: string }[] = [];
@@ -245,7 +298,7 @@ function extractTransferAgentsFromQueueResponse(
     if (!name) continue;
     out.push({ id: key, name });
   }
-  out.sort((a, b) => a.name.localeCompare(b.name, undefined, { sensitivity: "base" }));
+  out.sort((a, b) => Number(a.id) - Number(b.id));
   return out;
 }
 
@@ -611,11 +664,19 @@ function parseTicketListRows(raw: unknown[]): CustomerChatTicket[] {
     const ticketRegisteredAt = String(
       o.ticketRegisteredAt ?? o.ticket_registered_at ?? "",
     ).trim();
+    const complaintType = String(
+      o.complaintType ?? o.ComplaintType ?? "",
+    ).trim();
+    const complaintSubType = String(
+      o.complaintSubType ?? o.ComplaintSubType ?? "",
+    ).trim();
     if (!ticketNo && !ticketStatus) continue;
     out.push({
       ticketNo: ticketNo || "—",
       ticketStatus: ticketStatus || "—",
       ticketRegisteredAt,
+      complaintType,
+      complaintSubType,
     });
   }
   return out;
@@ -647,6 +708,27 @@ function extractTicketList(json: unknown): CustomerChatTicket[] {
   }
 
   return [];
+}
+
+async function fetchTicketListByChatId(
+  chatIndex: string | number,
+  agentUserId: string,
+): Promise<CustomerChatTicket[]> {
+  const url = new URL(getTicketListByChatIdUrl());
+  url.searchParams.set("Userid", agentUserId);
+  const res = await fetch(url.toString(), {
+    method: "POST",
+    credentials: getApiFetchCredentials(),
+    body: JSON.stringify({ chatIndex }),
+  });
+  if (!res.ok) {
+    throw new Error(`getTicketListByChatId failed: ${res.status}`);
+  }
+  const json: unknown = await res.json();
+  if (Array.isArray(json)) {
+    return parseTicketListRows(json);
+  }
+  return extractTicketList(json);
 }
 
 /** For queue row / chat mapping: set `Chat.isChatActive` only when the API sends a value. */
@@ -728,7 +810,7 @@ async function fetchQueueAndAssignedChats(agent: User): Promise<{
   initializer: BackendWsInitializer | null;
   domainIndex: number | null;
   chatFrom: number | null;
-  transferAgents: { id: string; name: string }[];
+  transferAgents: TransferAgentOption[];
   ticketDomains: { id: string; name: string }[];
   ticketEmailTemplates: { id: string; name: string }[];
   ticketSmsTemplates: { id: string; name: string }[];
@@ -903,7 +985,7 @@ interface State {
   domainIndex: number | null;
   chatFrom: number | null;
   /** Agent id → display name from getQueueNAssignedChats `userList` (or legacy top-level numeric keys). */
-  transferAgents: { id: string; name: string }[];
+  transferAgents: TransferAgentOption[];
   /** Domain id → label from `getQueueNAssignedChats` `domainList` (ticket panel). */
   ticketDomains: { id: string; name: string }[];
   /** Email templates from `getQueueNAssignedChats` `emailTemplates`. */
@@ -912,6 +994,8 @@ interface State {
   ticketSmsTemplates: { id: string; name: string }[];
   /** `CHAT_SEEN` can arrive before `NEW_MESSAGE`; apply when a message with that `id` appears. */
   pendingSeenByMsgId: Record<string, 3 | 4>;
+  /** True while `getTicketListByChatId` is in flight for the info sidebar. */
+  ticketListLoading: boolean;
 }
 
 const initialState: State = {
@@ -925,6 +1009,7 @@ const initialState: State = {
   ticketEmailTemplates: [],
   ticketSmsTemplates: [],
   pendingSeenByMsgId: {},
+  ticketListLoading: false,
 };
 
 function applyPendingSeenToMessage(
@@ -1189,7 +1274,11 @@ async function sendFileChunksViaWebSocket(
 
 export function useWebSocketChat(currentUser: User | null) {
   const [state, setState] = useState<State>(initialState);
+  const stateRef = useRef(state);
+  stateRef.current = state;
   const transferToastDedupRef = useRef<Record<string, number>>({});
+  /** Avoid overlapping `getTicketListByChatId` calls (e.g. Strict Mode or rapid toggles). */
+  const ticketListFetchInFlightRef = useRef(false);
 
   const client = useMemo(
     () => new ChatWebSocketClient(getChatWebSocketUrl()),
@@ -2178,6 +2267,46 @@ export function useWebSocketChat(currentUser: User | null) {
     })();
   };
 
+  const refreshActiveChatTickets = useCallback(async () => {
+    if (!currentUser || currentUser.role !== "agent") return;
+    if (ticketListFetchInFlightRef.current) return;
+    const snap = stateRef.current;
+    const chatId = snap.activeChatId;
+    if (!chatId) return;
+    const chat = snap.chats.find((c) => c.id === chatId);
+    if (!chat) return;
+    const chatIndex = getChatIndexForApi(chat);
+    if (chatIndex === null || String(chatIndex).trim() === "") {
+      toast.error("Unable to load tickets for this chat right now.");
+      return;
+    }
+    ticketListFetchInFlightRef.current = true;
+    setState((prev) => ({ ...prev, ticketListLoading: true }));
+    try {
+      const ticketList = await fetchTicketListByChatId(
+        chatIndex,
+        currentUser.id,
+      );
+      setState((prev) => ({
+        ...prev,
+        ticketListLoading: false,
+        chats:
+          prev.activeChatId === chatId
+            ? prev.chats.map((c) =>
+                c.id === chatId ? { ...c, ticketList } : c,
+              )
+            : prev.chats,
+      }));
+    } catch (e) {
+      setState((prev) => ({ ...prev, ticketListLoading: false }));
+      toast.error(
+        e instanceof Error ? e.message : "Unable to load tickets right now.",
+      );
+    } finally {
+      ticketListFetchInFlightRef.current = false;
+    }
+  }, [currentUser]);
+
   return {
     chats: state.chats,
     messages: state.messages,
@@ -2190,6 +2319,7 @@ export function useWebSocketChat(currentUser: User | null) {
     ticketDomains: state.ticketDomains,
     ticketEmailTemplates: state.ticketEmailTemplates,
     ticketSmsTemplates: state.ticketSmsTemplates,
+    ticketListLoading: state.ticketListLoading,
     startChat,
     claimChat,
     sendMessage,
@@ -2197,5 +2327,6 @@ export function useWebSocketChat(currentUser: User | null) {
     transferToAgent,
     resolveChat,
     selectChat,
+    refreshActiveChatTickets,
   };
 }

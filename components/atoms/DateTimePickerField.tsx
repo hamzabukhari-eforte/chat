@@ -65,6 +65,32 @@ type Props = {
   className?: string;
 };
 
+/** Tallest we allow the popover; lane below/above trigger is usually smaller. */
+const PICKER_MAX_HEIGHT_CAP_PX = 440;
+/** Space to leave inside the viewport when measuring room above/below the trigger. */
+const PICKER_VIEWPORT_EDGE_PX = 12;
+type PickerLayout = {
+  side: "top" | "bottom";
+  /** Whole popover: never taller than free space toward `side` from the trigger. */
+  maxHeightPx: number;
+};
+
+function computePickerLayout(triggerEl: HTMLElement | null): PickerLayout {
+  if (typeof window === "undefined" || !triggerEl) {
+    return { side: "bottom", maxHeightPx: PICKER_MAX_HEIGHT_CAP_PX };
+  }
+
+  const r = triggerEl.getBoundingClientRect();
+  const gap = PICKER_VIEWPORT_EDGE_PX * 2 + 6; /* sideOffset + margin */
+  const spaceBelow = window.innerHeight - r.bottom - gap;
+  const spaceAbove = r.top - gap;
+  const side = spaceBelow >= spaceAbove ? "bottom" : "top";
+  const lane = Math.max(0, side === "bottom" ? spaceBelow : spaceAbove);
+  const maxHeightPx = Math.min(PICKER_MAX_HEIGHT_CAP_PX, lane);
+
+  return { side, maxHeightPx };
+}
+
 /**
  * Single date + time (not a range): shadcn-style {@link Calendar} + one time field
  * in a {@link Card}, opened from a {@link Popover} trigger.
@@ -78,9 +104,31 @@ export function DateTimePickerField({
   className,
 }: Props) {
   const [open, setOpen] = React.useState(false);
+  const [pickerLayout, setPickerLayout] = React.useState<PickerLayout>(() =>
+    computePickerLayout(null),
+  );
   const [draft, setDraft] = React.useState<Date>(
     () => parseTicketDateTimeLocal(value) ?? new Date(),
   );
+
+  const syncPickerLayout = React.useCallback(() => {
+    const el =
+      typeof document !== "undefined"
+        ? (document.getElementById(id) as HTMLElement | null)
+        : null;
+    setPickerLayout(computePickerLayout(el));
+  }, [id]);
+
+  React.useLayoutEffect(() => {
+    if (!open) return;
+    syncPickerLayout();
+    window.addEventListener("resize", syncPickerLayout);
+    window.addEventListener("scroll", syncPickerLayout, true);
+    return () => {
+      window.removeEventListener("resize", syncPickerLayout);
+      window.removeEventListener("scroll", syncPickerLayout, true);
+    };
+  }, [open, syncPickerLayout]);
 
   const handleOpenChange = (next: boolean) => {
     setOpen(next);
@@ -126,13 +174,17 @@ export function DateTimePickerField({
           </Button>
         </PopoverTrigger>
         <PopoverContent
-          className="max-h-[min(85dvh,28rem)] w-auto max-w-[min(100vw-2rem,22rem)] overflow-y-auto overflow-x-hidden p-0"
+          className="w-auto max-w-[min(100vw-2rem,22rem)] overflow-y-auto overflow-x-hidden p-0"
+          style={{ maxHeight: Math.max(120, pickerLayout.maxHeightPx) }}
           align="start"
-          side="bottom"
+          side={pickerLayout.side}
           sideOffset={6}
+          onWheel={(e) => {
+            e.stopPropagation();
+          }}
         >
           <Card size="sm" className="border-0 shadow-none">
-            <CardContent className="p-2 sm:p-3">
+            <CardContent className="p-2 sm:p-2">
               <Calendar
                 mode="single"
                 selected={draft}
@@ -144,7 +196,7 @@ export function DateTimePickerField({
                 className="mx-auto [--rdp-accent-color:#4338ca] [--rdp-accent-background-color:#eef2ff]"
               />
             </CardContent>
-            <CardFooter className="flex-col items-stretch gap-3 border-t border-gray-100 bg-gray-50/90 p-3">
+            <CardFooter className="flex-col items-stretch gap-2 border-t border-gray-100 bg-gray-50/90 p-2 sm:p-2">
               <FieldGroup className="w-full">
                 <Field>
                   <FieldLabel htmlFor={`${id}-time`}>Time</FieldLabel>

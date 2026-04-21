@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useCallback, useEffect, useState } from "react";
 import { AnimatePresence, motion } from "framer-motion";
 import { useWebSocketChat } from "../../hooks/useWebSocketChat";
 import {
@@ -49,6 +49,20 @@ export function AgentDashboard() {
 
   const chat = useWebSocketChat(STATIC_AGENT);
 
+  const handleToggleCustomerInfo = useCallback(() => {
+    setShowCustomerInfo((wasOpen) => !wasOpen);
+  }, []);
+
+  /** Load tickets when opening the info panel — not inside `setState` (Strict Mode may run updaters twice in dev). */
+  useEffect(() => {
+    if (!showCustomerInfo || !chat.activeChatId) return;
+    void chat.refreshActiveChatTickets();
+  }, [
+    showCustomerInfo,
+    chat.activeChatId,
+    chat.refreshActiveChatTickets,
+  ]);
+
   useEffect(() => {
     if (!chat.activeChatId || !chat.activeChat) {
       setShowCustomerInfo(false);
@@ -76,7 +90,7 @@ export function AgentDashboard() {
             messages={chat.activeMessages}
             onSendMessage={chat.sendMessage}
             onResolveChat={chat.resolveChat}
-            onToggleCustomerInfo={() => setShowCustomerInfo((prev) => !prev)}
+            onToggleCustomerInfo={handleToggleCustomerInfo}
             showCustomerInfo={showCustomerInfo}
             transferAgents={chat.transferAgents}
             ticketDomains={chat.ticketDomains}
@@ -98,6 +112,7 @@ export function AgentDashboard() {
                 <CustomerInfoSidebarSection
                   customer={chat.activeChat?.customer ?? null}
                   ticketList={chat.activeChat?.ticketList}
+                  ticketsLoading={chat.ticketListLoading}
                   hasConversationMessages={
                     Boolean(chat.activeChatId) && chat.activeMessages.length > 0
                   }
