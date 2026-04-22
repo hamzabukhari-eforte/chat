@@ -413,6 +413,45 @@ function enrichIncomingMessageTimes(event: IncomingEvent): IncomingEvent {
   };
 }
 
+/** SES `NEW_MESSAGE_COUNT` → sidebar unread badge updates. */
+function tryNormalizeNewMessageCount(raw: unknown): IncomingEvent | null {
+  if (!raw || typeof raw !== "object") return null;
+  const o = raw as Record<string, unknown>;
+  if (String(o.event).toUpperCase() !== "NEW_MESSAGE_COUNT") return null;
+
+  const data =
+    o.data && typeof o.data === "object" && !Array.isArray(o.data)
+      ? (o.data as Record<string, unknown>)
+      : null;
+  if (!data) return null;
+
+  const chatIdRaw =
+    data.chatId ?? data.chatroomId ?? data.chatIndex ?? data.ChatId;
+  if (chatIdRaw === undefined || chatIdRaw === null) return null;
+  const chatId = String(chatIdRaw).trim();
+  if (!chatId) return null;
+
+  const toOptionalNumber = (v: unknown): number | undefined => {
+    if (v === undefined || v === null || String(v).trim() === "") return undefined;
+    const n = Number(v);
+    return Number.isFinite(n) ? Math.trunc(n) : undefined;
+  };
+
+  const countsRaw =
+    data.counts ?? data.count ?? data.unreadCount ?? data.unread_count;
+  const counts = toOptionalNumber(countsRaw);
+
+  return {
+    type: "new-message-count",
+    payload: {
+      chatId,
+      domainIndex: toOptionalNumber(data.domainIndex ?? data.DomainIndex),
+      chatFrom: toOptionalNumber(data.chatFrom ?? data.ChatFrom),
+      ...(counts !== undefined && counts >= 0 ? { counts } : {}),
+    },
+  };
+}
+
 /** SES `NEW_MESSAGE` → internal `message` event for the hook reducer. */
 function tryNormalizeNewMessage(raw: unknown): IncomingEvent | null {
   if (!raw || typeof raw !== "object") return null;
@@ -609,6 +648,7 @@ export class ChatWebSocketClient {
         const normalized =
           tryNormalizeBackendEvent(raw) ??
           tryNormalizeNewMessage(raw) ??
+          tryNormalizeNewMessageCount(raw) ??
           tryNormalizeNewChatInQueue(raw) ??
           tryNormalizeChatTransfer(raw) ??
           tryNormalizeChatSeen(raw);

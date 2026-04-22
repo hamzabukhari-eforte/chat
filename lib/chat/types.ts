@@ -4,13 +4,61 @@ export type ChatStatus = "queued" | "assigned" | "resolved";
 
 export type OnlineStatus = "online" | "away" | "offline";
 
-/** Row from SES `loadConversationById` → `ticketList`. */
+/** Single follow-up row from SES ticket payload (`followupHistory`). */
+export interface TicketFollowupEntry {
+  statusColor?: string;
+  statusText?: string;
+  index?: number;
+  remarks?: string;
+  followupBy?: string;
+  followupDate?: string;
+}
+
+export interface TicketAttachmentHistoryEntry {
+  actual?: string;
+  filename?: string;
+  created?: string;
+}
+
+export interface TicketAssignmentHistoryEntry {
+  teamName?: string;
+  assignDate?: string;
+  index?: number;
+  engineerName?: string;
+}
+
+/**
+ * Row from SES `loadConversationById` / `getTicketListByChatId` → `ticketList`.
+ * Core fields are always normalized for the UI; richer blocks are optional when the API sends them.
+ */
 export interface CustomerChatTicket {
   ticketNo: string;
   ticketStatus: string;
+  statusColor?: string;
   ticketRegisteredAt: string;
+  ticketIndexPtr?: string | number;
   complaintType: string;
   complaintSubType: string;
+  reportedBy?: string;
+  priority?: string;
+  priorityLevel?: string;
+  nature?: string;
+  domain?: string;
+  briefDescription?: string;
+  detailedDescription?: string;
+  reportedDate?: string;
+  problemOccuredDate?: string;
+  location?: string;
+  source?: string | null;
+  emailBody?: string | null;
+  actionTakenList?: Record<string, string>;
+  dynamicFields?: Record<string, string>;
+  followupHistory?: TicketFollowupEntry[];
+  attachmentHistory?: TicketAttachmentHistoryEntry[];
+  assignmentHistory?: TicketAssignmentHistoryEntry[];
+  solutionHistory?: unknown[];
+  agentRemarks?: unknown[];
+  analysisHistory?: unknown[];
 }
 
 export interface User {
@@ -52,6 +100,11 @@ export interface Chat {
   lastAssignedAgent?: string;
   /** From queue API / `NEW_CHAT_IN_QUEUE` when present (e.g. last activity time label). */
   lastChatTime?: string;
+  /**
+   * Unread / new-message count from `getQueueNAssignedChats` / `assignChat` (`counts`),
+   * or incremented via WebSocket `NEW_MESSAGE_COUNT` when the chat is not open.
+   */
+  counts?: number;
   /** Populated after `loadConversationById` when the API includes `ticketList`. */
   ticketList?: CustomerChatTicket[];
 }
@@ -165,6 +218,17 @@ export type IncomingEvent =
         chatStatus?: number;
         domainIndex?: number;
         chatFrom?: number;
+      };
+    }
+  | {
+      /** SES WebSocket `NEW_MESSAGE_COUNT` — bump unread for a chat when it is not selected. */
+      type: "new-message-count";
+      payload: {
+        chatId: string;
+        domainIndex?: number;
+        chatFrom?: number;
+        /** When set, replaces the local count (authoritative from server). */
+        counts?: number;
       };
     };
 

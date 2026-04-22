@@ -14,6 +14,12 @@ interface Props {
   onClaimChat: (chatId: string) => void;
 }
 
+function unreadBadgeLabel(n: number): string {
+  if (n <= 0) return "";
+  if (n > 99) return "99+";
+  return String(n);
+}
+
 function formatTime(dateString: string): string {
   const date = new Date(dateString);
   const now = new Date();
@@ -195,6 +201,7 @@ export function ChatSidebarSection({
               (chat.lastMessage
                 ? formatTime(chat.lastMessage.createdAt)
                 : "");
+            const unread = chat.counts ?? 0;
 
             return (
               <button
@@ -227,9 +234,21 @@ export function ChatSidebarSection({
                       </span>
                     )}
                   </div>
-                  <p className="text-[10px] text-gray-500 truncate">
-                    {chat.customer.phone ?? ""}
-                  </p>
+                  {(chat.customer.phone?.trim() || unread > 0) ? (
+                    <div className="flex items-center justify-between gap-2">
+                      <p className="min-w-0 flex-1 truncate text-[10px] text-gray-500">
+                        {chat.customer.phone?.trim() ?? ""}
+                      </p>
+                      {unread > 0 ? (
+                        <span
+                          className="flex min-h-4.5 min-w-4.5 shrink-0 items-center justify-center rounded-full bg-red-500 px-1.5 text-[9px] font-semibold leading-none text-white"
+                          aria-label={`${unread} unread messages`}
+                        >
+                          {unreadBadgeLabel(unread)}
+                        </span>
+                      ) : null}
+                    </div>
+                  ) : null}
                 </div>
               </button>
             );

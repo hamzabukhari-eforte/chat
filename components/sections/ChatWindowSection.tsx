@@ -55,6 +55,7 @@ import { useAutoGrowTextarea } from "../../hooks/useAutoGrowTextarea";
 import type {
   Attachment,
   Chat,
+  CustomerChatTicket,
   Message,
   TransferAgentOption,
 } from "../../lib/chat/types";
@@ -84,6 +85,10 @@ interface Props {
   ticketSmsTemplates?: { id: string; name: string }[];
   /** Logged-in agent id for ticket / SES register-complaint calls. */
   agentUserId: string;
+  /** Tickets for the open chat (refreshed when the ticket drawer opens). */
+  ticketList?: CustomerChatTicket[];
+  ticketsLoading?: boolean;
+  onTicketDrawerOpen?: () => void;
 }
 
 const ACCEPTED_IMAGE_TYPES = "image/jpeg,image/png,image/gif,image/webp";
@@ -172,6 +177,9 @@ export function ChatWindowSection({
   ticketEmailTemplates = [],
   ticketSmsTemplates = [],
   agentUserId,
+  ticketList,
+  ticketsLoading = false,
+  onTicketDrawerOpen,
 }: Props) {
   const [draft, setDraft] = useState("");
   const [transferMenuOpen, setTransferMenuOpen] = useState(false);
@@ -502,7 +510,7 @@ export function ChatWindowSection({
               "w-5 h-5 flex items-center justify-center transition-colors cursor-pointer " +
               (showCustomerInfo
                 ? "text-brand-600"
-                : "text-gray-400 hover:text-brand-600")
+                : "text-gray-500 hover:text-brand-600")
             }
           >
             <FiInfo className="w-4 h-4" />
@@ -582,13 +590,22 @@ export function ChatWindowSection({
       </div>
 
       <TicketDrawerSection
+        key={
+          ticketDrawerOpen
+            ? `ticket-drawer-${activeChat.id}`
+            : "ticket-drawer-idle"
+        }
         open={ticketDrawerOpen}
         onOpenChange={setTicketDrawerOpen}
         agentUserId={agentUserId}
+        customerPhone={activeChat.customer.phone ?? ""}
         domainOptions={ticketDomains}
         emailTemplateOptions={ticketEmailTemplates}
         smsTemplateOptions={ticketSmsTemplates}
         chatIndex={activeChat.whatsappChatIndex ?? activeChat.id}
+        ticketList={ticketList ?? activeChat.ticketList ?? []}
+        ticketsLoading={ticketsLoading}
+        onTicketDrawerOpen={onTicketDrawerOpen}
       />
 
       {/* Messages */}

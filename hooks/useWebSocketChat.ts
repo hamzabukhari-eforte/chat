@@ -21,6 +21,7 @@ import {
   binaryChunkCountForFileSize,
   FILE_CHUNK_SIZE_BYTES,
 } from "../lib/chat/fileChunks";
+import { parseTicketListRows } from "../lib/chat/ticketList";
 import type {
   Attachment,
   Chat,
@@ -410,6 +411,16 @@ function mapQueueRowToChat(
 
   const lastChatTimeRaw = String(row.lastChatTime ?? "").trim();
 
+  const countsRaw = row.counts;
+  const countsNum = Number(countsRaw);
+  const counts =
+    countsRaw !== undefined &&
+    countsRaw !== null &&
+    String(countsRaw).trim() !== "" &&
+    Number.isFinite(countsNum)
+      ? Math.max(0, Math.trunc(countsNum))
+      : undefined;
+
   return {
     id,
     customer,
@@ -427,6 +438,7 @@ function mapQueueRowToChat(
     ),
     lastAssignedAgent,
     ...(lastChatTimeRaw !== "" ? { lastChatTime: lastChatTimeRaw } : {}),
+    ...(counts !== undefined ? { counts } : {}),
   };
 }
 
@@ -650,36 +662,6 @@ function extractIsChatActive(json: unknown): boolean | null {
   if (raw === "true" || raw === 1) return true;
   if (raw === "false" || raw === 0) return false;
   return null;
-}
-
-function parseTicketListRows(raw: unknown[]): CustomerChatTicket[] {
-  const out: CustomerChatTicket[] = [];
-  for (const item of raw) {
-    if (!item || typeof item !== "object") continue;
-    const o = item as Record<string, unknown>;
-    const ticketNo = String(o.ticketNo ?? o.TicketNo ?? "").trim();
-    const ticketStatus = String(
-      o.ticketStatus ?? o.TicketStatus ?? "",
-    ).trim();
-    const ticketRegisteredAt = String(
-      o.ticketRegisteredAt ?? o.ticket_registered_at ?? "",
-    ).trim();
-    const complaintType = String(
-      o.complaintType ?? o.ComplaintType ?? "",
-    ).trim();
-    const complaintSubType = String(
-      o.complaintSubType ?? o.ComplaintSubType ?? "",
-    ).trim();
-    if (!ticketNo && !ticketStatus) continue;
-    out.push({
-      ticketNo: ticketNo || "—",
-      ticketStatus: ticketStatus || "—",
-      ticketRegisteredAt,
-      complaintType,
-      complaintSubType,
-    });
-  }
-  return out;
 }
 
 function extractTicketList(json: unknown): CustomerChatTicket[] {
@@ -1029,12 +1011,20 @@ function mergeChatsById(prev: Chat[], incoming: Chat[]): Chat[] {
   prev.forEach((c) => map.set(c.id, c));
   incoming.forEach((c) => {
     const existing = map.get(c.id);
-    if (
-      existing &&
-      c.ticketList === undefined &&
-      existing.ticketList !== undefined
-    ) {
-      map.set(c.id, { ...c, ticketList: existing.ticketList });
+    if (!existing) {
+      map.set(c.id, c);
+      return;
+    }
+    const ticketList =
+      c.ticketList === undefined && existing.ticketList !== undefined
+        ? existing.ticketList
+        : c.ticketList;
+    const counts =
+      c.counts === undefined && existing.counts !== undefined
+        ? existing.counts
+        : c.counts;
+    if (ticketList !== c.ticketList || counts !== c.counts) {
+      map.set(c.id, { ...c, ticketList, counts });
     } else {
       map.set(c.id, c);
     }
@@ -1619,6 +1609,48 @@ export function useWebSocketChat(currentUser: User | null) {
           }
           case "chat-transfer": {
             return prev;
+          }
+          case "new-message-count": {
+            const { chatId, domainIndex, chatFrom, counts: absoluteCounts } =
+              event.payload;
+            const idStr = String(chatId).trim();
+            if (!idStr) return prev;
+
+            if (
+              domainIndex !== undefined &&
+              prev.domainIndex !== null &&
+              prev.domainIndex !== domainIndex
+            ) {
+              return prev;
+            }
+            if (
+              chatFrom !== undefined &&
+              prev.chatFrom !== null &&
+              prev.chatFrom !== chatFrom
+            ) {
+              return prev;
+            }
+
+            if (prev.activeChatId === idStr) return prev;
+
+            const matchesRow = (c: Chat) =>
+              c.id === idStr ||
+              (c.whatsappChatIndex !== undefined &&
+                String(c.whatsappChatIndex) === idStr);
+
+            if (!prev.chats.some(matchesRow)) return prev;
+
+            return {
+              ...prev,
+              chats: prev.chats.map((c) => {
+                if (!matchesRow(c)) return c;
+                const next =
+                  absoluteCounts !== undefined && Number.isFinite(absoluteCounts)
+                    ? Math.max(0, Math.trunc(absoluteCounts))
+                    : Math.max(0, (c.counts ?? 0) + 1);
+                return { ...c, counts: next };
+              }),
+            };
           }
           default:
             return prev;
@@ -2243,7 +2275,7 @@ export function useWebSocketChat(currentUser: User | null) {
             activeChatId: chatId,
             chats: prev.chats.map((c) =>
               c.id === chatId
-                ? { ...c, ...chatActivePatch, ticketList }
+                ? { ...c, ...chatActivePatch, ticketList, counts: 0 }
                 : c,
             ),
             messages: [

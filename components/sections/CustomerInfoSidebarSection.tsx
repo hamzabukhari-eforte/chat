@@ -33,6 +33,22 @@ function formatTicketRegisteredAt(raw: string): string {
   });
 }
 
+function ticketStatusColor(ticket: CustomerChatTicket): string | undefined {
+  if (ticket.statusColor?.trim()) return ticket.statusColor.trim();
+  const followups = ticket.followupHistory ?? [];
+  if (followups.length === 0) return undefined;
+  const sorted = [...followups].sort((a, b) => {
+    const ia = a.index ?? 0;
+    const ib = b.index ?? 0;
+    if (ia !== ib) return ia - ib;
+    return String(a.followupDate ?? "").localeCompare(
+      String(b.followupDate ?? ""),
+    );
+  });
+  const color = sorted[sorted.length - 1]?.statusColor?.trim();
+  return color || undefined;
+}
+
 export function CustomerInfoSidebarSection({
   customer,
   ticketList,
@@ -118,7 +134,9 @@ export function CustomerInfoSidebarSection({
           ) : ticketsForDisplay.length === 0 ? (
             <p className="text-xs text-gray-500">No tickets for this conversation.</p>
           ) : (
-            ticketsForDisplay.map((t) => (
+            ticketsForDisplay.map((t) => {
+              const statusColorCode = ticketStatusColor(t);
+              return (
               <div key={t.ticketNo} className="flex gap-2 border-b border-gray-200 pb-2">
                 <div className="flex h-5 w-5 shrink-0 items-center justify-center rounded border border-gray-100 bg-gray-50">
                   <FiTag className="h-3 w-3 text-gray-500" aria-hidden />
@@ -133,7 +151,18 @@ export function CustomerInfoSidebarSection({
                   </p>
                   <p className="mt-0.5 text-xs text-gray-500">
                     Status: {" "}
-                    <span className="font-medium text-gray-600">
+                    <span
+                      className="inline-flex rounded-full px-1.5 py-0.5 font-medium"
+                      style={
+                        statusColorCode
+                          ? {
+                              color: statusColorCode,
+                              borderColor: statusColorCode,
+                              backgroundColor: `${statusColorCode}1A`,
+                            }
+                          : undefined
+                      }
+                    >
                       {t.ticketStatus}
                     </span>
                   </p>
@@ -161,7 +190,7 @@ export function CustomerInfoSidebarSection({
                   ) : null}
                 </div>
               </div>
-            ))
+            )})
           )}
         </div>
       </div>

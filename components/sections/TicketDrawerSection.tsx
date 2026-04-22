@@ -23,7 +23,15 @@ import {
   postGenerateComplaintViewSavedata,
   postRegisterComplaintView,
 } from "@/lib/chat/registerComplaint";
+import type { CustomerChatTicket } from "@/lib/chat/types";
+import { AGENT_APP_HEADER_HEIGHT_VAR } from "@/lib/layout/agentAppLayout";
 import { cn } from "@/lib/utils";
+import { TicketDrawerTicketsList } from "./TicketDrawerTicketsList";
+
+/** Same outline style as the main "Ticket" control in {@link ChatWindowSection}. */
+const CHAT_HEADER_OUTLINED_BTN =
+  "h-8 px-4 flex items-center gap-1.5 rounded-lg border border-gray-200 text-gray-700 text-xs font-medium " +
+  "hover:border-brand-300 hover:bg-brand-50 hover:text-brand-600 transition-colors cursor-pointer shrink-0";
 
 export type TicketSelectOption = { id: string; name: string };
 
@@ -32,6 +40,8 @@ type Props = {
   onOpenChange: (open: boolean) => void;
   /** Logged-in agent id — sent to SES `registercomplaint/view` with domain lookups. */
   agentUserId: string;
+  /** Phone number of the currently selected chat/customer. */
+  customerPhone?: string;
   /** From `getQueueNAssignedChats` → `domainList`. */
   domainOptions: TicketSelectOption[];
   /** From `getQueueNAssignedChats` → `emailTemplates`. */
@@ -40,6 +50,12 @@ type Props = {
   smsTemplateOptions: TicketSelectOption[];
   /** Active chat index for ticket save payload. */
   chatIndex?: string | number | null;
+  /** Tickets for the active chat (from conversation load or refresh). */
+  ticketList?: CustomerChatTicket[];
+  /** True while tickets are being fetched for the drawer. */
+  ticketsLoading?: boolean;
+  /** Called when the ticket drawer opens so the parent can refresh the list. */
+  onTicketDrawerOpen?: () => void;
 };
 
 function emptyTicketFields() {
@@ -105,6 +121,7 @@ function formatProblemOccurredForApi(raw: string): string {
 /** Mounts only while the drawer is open so form state resets without a sync effect. */
 function TicketDrawerFormBody({
   agentUserId,
+  customerPhone,
   domainOptions,
   emailTemplateOptions,
   smsTemplateOptions,
@@ -113,6 +130,7 @@ function TicketDrawerFormBody({
 }: Pick<
   Props,
   | "agentUserId"
+  | "customerPhone"
   | "domainOptions"
   | "emailTemplateOptions"
   | "smsTemplateOptions"
@@ -484,10 +502,12 @@ function TicketDrawerFormBody({
     };
     const reportedDate = formatTicketDateTime(new Date());
     const selectedSource = STATIC_SOURCES.find((s) => s.id === fields.source);
+    const phoneForUserId = String(customerPhone ?? "").trim();
     const payload: Record<string, unknown> = {
       domain: toInt(fields.domainId),
       Nature: toInt(fields.complaintNature),
       users: 0,
+      cli: phoneForUserId,
       ComplaintType: toInt(fields.complaintType),
       ComplaintSubType: toInt(fields.ComplaintSubType),
       Priority: toInt(fields.priority),
@@ -1010,13 +1030,25 @@ export function TicketDrawerSection({
   open,
   onOpenChange,
   agentUserId,
+  customerPhone,
   domainOptions,
   emailTemplateOptions,
   smsTemplateOptions,
   chatIndex,
+  ticketList = [],
+  ticketsLoading = false,
+  onTicketDrawerOpen,
 }: Props) {
   const titleId = useId();
   const descriptionId = useId();
+  const [drawerView, setDrawerView] = useState<"list" | "form">("list");
+
+  useEffect(() => {
+    if (!open) return;
+    queueMicrotask(() => {
+      onTicketDrawerOpen?.();
+    });
+  }, [open, onTicketDrawerOpen]);
 
   useEffect(() => {
     if (!open) return;
@@ -1040,13 +1072,18 @@ export function TicketDrawerSection({
           animate={{ x: 0 }}
           exit={{ x: "-100%" }}
           transition={{ type: "spring", damping: 32, stiffness: 360 }}
+          style={{
+            top: `var(${AGENT_APP_HEADER_HEIGHT_VAR}, 56px)`,
+            height: `calc(100dvh - var(${AGENT_APP_HEADER_HEIGHT_VAR}, 56px))`,
+            maxHeight: `calc(100dvh - var(${AGENT_APP_HEADER_HEIGHT_VAR}, 56px))`,
+          }}
           className={cn(
-            "fixed left-0 top-0 z-40 flex h-[100dvh] max-h-[100dvh] w-[92vw] max-w-[720px] flex-col bg-white sm:w-[560px] md:w-[640px] lg:w-[720px]",
+            "fixed left-0 z-40 flex w-[92vw] max-w-[720px] flex-col bg-white sm:w-[560px] md:w-[640px] lg:w-[720px]",
             "border-0 border-r border-gray-200 shadow-none",
           )}
         >
-          <header className="flex shrink-0 flex-row items-center justify-between gap-3 border-b border-gray-100 p-4">
-            <div className="flex min-w-0 items-center gap-2">
+          <header className="flex shrink-0 flex-row items-center justify-between gap-2 border-b border-gray-100 p-4 sm:gap-3">
+            <div className="flex min-w-0 flex-1 items-center gap-2">
               <HiOutlineTicket
                 className="h-5 w-5 shrink-0 text-brand-600"
                 aria-hidden
@@ -1056,28 +1093,54 @@ export function TicketDrawerSection({
                   id={titleId}
                   className="text-base text-brand-500 font-semibold leading-none"
                 >
-                  Register Complaint
+                  {drawerView === "list" ? "Tickets" : "Register Complaint"}
                 </h2>
+                <p id={descriptionId} className="sr-only">
+                  {drawerView === "list"
+                    ? "Tickets for this conversation. Use Create new ticket in the header, or expand a card for details and review."
+                    : "Register a new complaint using the form below."}
+                </p>
               </div>
             </div>
-            <button
-              type="button"
-              onClick={() => onOpenChange(false)}
-              aria-label="Close ticket panel"
-              className="flex h-8 w-8 shrink-0 items-center justify-center rounded-lg border border-gray-200 text-gray-500 transition-colors hover:border-brand-300 hover:bg-brand-50 hover:text-brand-600 cursor-pointer"
-            >
-              <FiX className="h-4 w-4" />
-            </button>
+            <div className="flex shrink-0 items-center gap-2">
+              <button
+                type="button"
+                onClick={() =>
+                  setDrawerView((prev) => (prev === "list" ? "form" : "list"))
+                }
+                className={CHAT_HEADER_OUTLINED_BTN}
+              >
+                {drawerView === "list"
+                  ? "Create new ticket"
+                  : "View recent tickets"}
+              </button>
+              <button
+                type="button"
+                onClick={() => onOpenChange(false)}
+                aria-label="Close ticket panel"
+                className="flex h-8 w-8 shrink-0 items-center justify-center rounded-lg border border-gray-200 text-gray-500 transition-colors hover:border-brand-300 hover:bg-brand-50 hover:text-brand-600 cursor-pointer"
+              >
+                <FiX className="h-4 w-4" />
+              </button>
+            </div>
           </header>
 
-          <TicketDrawerFormBody
-            agentUserId={agentUserId}
-            domainOptions={domainOptions}
-            emailTemplateOptions={emailTemplateOptions}
-            smsTemplateOptions={smsTemplateOptions}
-            chatIndex={chatIndex}
-            onOpenChange={onOpenChange}
-          />
+          {drawerView === "list" ? (
+            <TicketDrawerTicketsList
+              tickets={ticketList}
+              loading={ticketsLoading}
+            />
+          ) : (
+            <TicketDrawerFormBody
+              agentUserId={agentUserId}
+              customerPhone={customerPhone}
+              domainOptions={domainOptions}
+              emailTemplateOptions={emailTemplateOptions}
+              smsTemplateOptions={smsTemplateOptions}
+              chatIndex={chatIndex}
+              onOpenChange={onOpenChange}
+            />
+          )}
         </motion.aside>
       ) : null}
     </AnimatePresence>

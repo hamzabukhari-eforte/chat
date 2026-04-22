@@ -1,15 +1,24 @@
 "use client";
 
-import { useCallback, useEffect, useState } from "react";
+import {
+  useCallback,
+  useEffect,
+  useLayoutEffect,
+  useRef,
+  useState,
+  type CSSProperties,
+} from "react";
 import { AnimatePresence, motion } from "framer-motion";
 import { useWebSocketChat } from "../../hooks/useWebSocketChat";
 import {
   // ChannelDrawerSection,
   type ChannelId,
 } from "./ChannelDrawerSection";
+import { AgentAppHeader } from "./AgentAppHeader";
 import { ChatSidebarSection } from "./ChatSidebarSection";
 import { ChatWindowSection } from "./ChatWindowSection";
 import { CustomerInfoSidebarSection } from "./CustomerInfoSidebarSection";
+import { AGENT_APP_HEADER_HEIGHT_VAR } from "@/lib/layout/agentAppLayout";
 
 const CHANNEL_PLACEHOLDER: Record<
   Exclude<ChannelId, "webchat">,
@@ -46,8 +55,22 @@ const STATIC_AGENT = {
 export function AgentDashboard() {
   const [showCustomerInfo, setShowCustomerInfo] = useState(false);
   const [activeChannel, setActiveChannel] = useState<ChannelId>("webchat");
+  const agentHeaderMeasureRef = useRef<HTMLDivElement>(null);
+  const [agentHeaderHeightPx, setAgentHeaderHeightPx] = useState(56);
 
   const chat = useWebSocketChat(STATIC_AGENT);
+
+  useLayoutEffect(() => {
+    const el = agentHeaderMeasureRef.current;
+    if (!el) return;
+    const measure = () => {
+      setAgentHeaderHeightPx(Math.ceil(el.getBoundingClientRect().height));
+    };
+    measure();
+    const ro = new ResizeObserver(measure);
+    ro.observe(el);
+    return () => ro.disconnect();
+  }, []);
 
   const handleToggleCustomerInfo = useCallback(() => {
     setShowCustomerInfo((wasOpen) => !wasOpen);
@@ -70,13 +93,24 @@ export function AgentDashboard() {
   }, [chat.activeChatId, chat.activeChat?.id]);
 
   return (
-    <div className="flex h-full min-h-0 w-full flex-1 overflow-hidden">
-      {/* <ChannelDrawerSection
+    <div
+      className="flex h-full min-h-0 w-full flex-1 flex-col overflow-hidden"
+      style={
+        {
+          [AGENT_APP_HEADER_HEIGHT_VAR]: `${agentHeaderHeightPx}px`,
+        } as CSSProperties
+      }
+    >
+      <div ref={agentHeaderMeasureRef} className="shrink-0">
+        <AgentAppHeader agentName={STATIC_AGENT.name} />
+      </div>
+      <div className="flex min-h-0 flex-1 overflow-hidden">
+        {/* <ChannelDrawerSection
         activeChannel={activeChannel}
         onChannelChange={setActiveChannel}
       /> */}
 
-      {activeChannel === "webchat" ? (
+        {activeChannel === "webchat" ? (
         <>
           <ChatSidebarSection
             queue={chat.queue}
@@ -99,6 +133,9 @@ export function AgentDashboard() {
             agentUserId={STATIC_AGENT.id}
             onTransferToQueue={chat.transferToQueue}
             onTransferToAgent={chat.transferToAgent}
+            ticketList={chat.activeChat?.ticketList}
+            ticketsLoading={chat.ticketListLoading}
+            onTicketDrawerOpen={chat.refreshActiveChatTickets}
           />
           <AnimatePresence>
             {showCustomerInfo && (
@@ -138,7 +175,8 @@ export function AgentDashboard() {
             Open Web Chat
           </button>
         </div>
-      )}
+        )}
+      </div>
     </div>
   );
 }
