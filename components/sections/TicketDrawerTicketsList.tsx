@@ -7,6 +7,7 @@ import {
   FiPaperclip,
 } from "react-icons/fi";
 import { toast } from "sonner";
+import { postCreateTicketReviewByChatId } from "@/lib/chat/createTicketReviewByChatId";
 import { parseTicketListRow } from "@/lib/chat/ticketList";
 import type { CustomerChatTicket } from "@/lib/chat/types";
 import { cn } from "@/lib/utils";
@@ -18,6 +19,12 @@ const CHAT_HEADER_SECONDARY_BTN =
   "hover:border-brand-300 hover:bg-brand-50 hover:text-brand-600 transition-colors cursor-pointer";
 
 type Props = {
+  /** Logged-in agent — `Userid` query param for SES. */
+  agentUserId: string;
+  /** WhatsApp chat index for the active conversation. */
+  chatIndex?: string | number | null;
+  /** Customer phone (CLI). */
+  cli?: string;
   tickets: CustomerChatTicket[];
   loading: boolean;
 };
@@ -153,6 +160,9 @@ function DetailLine({
 }
 
 export function TicketDrawerTicketsList({
+  agentUserId,
+  chatIndex,
+  cli,
   tickets,
   loading,
 }: Props) {
@@ -167,6 +177,9 @@ export function TicketDrawerTicketsList({
   const [reviewDraftByTicket, setReviewDraftByTicket] = useState<
     Record<string, string>
   >({});
+  const [savingReviewForTicketNo, setSavingReviewForTicketNo] = useState<
+    string | null
+  >(null);
   const reviewMenuRef = useRef<HTMLDivElement | null>(null);
   const ticketDetailsFetchInFlightRef = useRef<Record<string, boolean>>({});
 
@@ -222,6 +235,59 @@ export function TicketDrawerTicketsList({
     [expandedNo, ticketDetailsByNo],
   );
 
+  const saveReview = useCallback(
+    async (ticket: CustomerChatTicket) => {
+      const review = (reviewDraftByTicket[ticket.ticketNo] ?? "").trim();
+      if (!review) {
+        toast.error("Write a review before saving.");
+        return;
+      }
+      if (chatIndex === undefined || chatIndex === null || String(chatIndex).trim() === "") {
+        toast.error("Chat is not ready yet (missing chat index).");
+        return;
+      }
+      const ticketIndex = ticket.ticketIndexPtr;
+      if (ticketIndex === undefined || ticketIndex === null || String(ticketIndex).trim() === "") {
+        toast.error("Ticket index is missing; refresh the ticket list and try again.");
+        return;
+      }
+      const cliNorm = (cli ?? "").trim();
+      if (!cliNorm) {
+        toast.error("Customer phone (CLI) is missing for this chat.");
+        return;
+      }
+      const uid = agentUserId.trim();
+      if (!uid) {
+        toast.error("Agent session is not available.");
+        return;
+      }
+
+      setSavingReviewForTicketNo(ticket.ticketNo);
+      try {
+        await postCreateTicketReviewByChatId(uid, {
+          chatIndex,
+          ticketIndex,
+          review,
+          cli: cliNorm,
+        });
+        toast.success(`Review saved for ticket ${ticket.ticketNo}.`);
+        setReviewOpenFor(null);
+        setReviewDraftByTicket((prev) => {
+          const next = { ...prev };
+          delete next[ticket.ticketNo];
+          return next;
+        });
+      } catch (e) {
+        toast.error(
+          e instanceof Error ? e.message : "Unable to save the review.",
+        );
+      } finally {
+        setSavingReviewForTicketNo(null);
+      }
+    },
+    [agentUserId, chatIndex, cli, reviewDraftByTicket],
+  );
+
   return (
     <div className="flex min-h-0 flex-1 flex-col overflow-hidden">
       <div className="min-h-0 flex-1 space-y-3 overflow-y-auto p-4">
@@ -249,6 +315,7 @@ export function TicketDrawerTicketsList({
             const followups = sortedFollowups(ticketView);
             const reviewOpen = reviewOpenFor === ticket.ticketNo;
             const reviewDraft = reviewDraftByTicket[ticket.ticketNo] ?? "";
+            const savingReview = savingReviewForTicketNo === ticket.ticketNo;
             const detailLoading = Boolean(loadingByTicketNo[ticket.ticketNo]);
             const isClosed =
               ticketView.ticketStatus.trim().toLowerCase() === "closed";
@@ -338,22 +405,19 @@ export function TicketDrawerTicketsList({
                             <div className="mt-2 flex justify-end gap-2">
                               <button
                                 type="button"
+                                disabled={savingReview}
                                 onClick={() => setReviewOpenFor(null)}
-                                className="rounded-lg border border-gray-200 bg-white px-3 py-1.5 text-xs font-medium text-gray-700 transition-colors hover:bg-gray-50 cursor-pointer"
+                                className="rounded-lg border border-gray-200 bg-white px-3 py-1.5 text-xs font-medium text-gray-700 transition-colors hover:bg-gray-50 cursor-pointer disabled:opacity-50"
                               >
                                 Cancel
                               </button>
                               <button
                                 type="button"
-                                onClick={() => {
-                                  toast.success(
-                                    `Review saved for ticket ${ticket.ticketNo}.`,
-                                  );
-                                  setReviewOpenFor(null);
-                                }}
-                                className="rounded-lg border border-brand-600 bg-brand-600 px-3 py-1.5 text-xs font-medium text-white transition-colors hover:bg-brand-700 cursor-pointer"
+                                disabled={savingReview}
+                                onClick={() => void saveReview(ticket)}
+                                className="rounded-lg border border-brand-600 bg-brand-600 px-3 py-1.5 text-xs font-medium text-white transition-colors hover:bg-brand-700 cursor-pointer disabled:opacity-50"
                               >
-                                Save
+                                {savingReview ? "Saving…" : "Save"}
                               </button>
                             </div>
                           </div>

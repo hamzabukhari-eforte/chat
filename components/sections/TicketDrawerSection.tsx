@@ -1127,6 +1127,9 @@ export function TicketDrawerSection({
 
           {drawerView === "list" ? (
             <TicketDrawerTicketsList
+              agentUserId={agentUserId}
+              chatIndex={chatIndex}
+              cli={customerPhone}
               tickets={ticketList}
               loading={ticketsLoading}
             />
