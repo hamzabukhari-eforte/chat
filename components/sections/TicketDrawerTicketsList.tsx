@@ -7,6 +7,7 @@ import {
   FiPaperclip,
 } from "react-icons/fi";
 import { toast } from "sonner";
+import { getApiOrigin } from "@/lib/chat/apiOrigin";
 import { postCreateTicketReviewByChatId } from "@/lib/chat/createTicketReviewByChatId";
 import { parseTicketListRow } from "@/lib/chat/ticketList";
 import type { CustomerChatTicket } from "@/lib/chat/types";
@@ -29,27 +30,11 @@ type Props = {
   loading: boolean;
 };
 
-const DEFAULT_HTTP_API_ORIGIN = "http://10.0.10.53:8080";
-const DEFAULT_TICKET_DETAILS_BY_INDEX_PATH =
+const TICKET_DETAILS_BY_INDEX_PATH =
   "/SES/assigncomplaint/GetTicketDetailsByIndex";
 
-function getDefaultApiOrigin(): string {
-  if (typeof window === "undefined") return DEFAULT_HTTP_API_ORIGIN;
-  return window.location.protocol === "https:"
-    ? window.location.origin
-    : DEFAULT_HTTP_API_ORIGIN;
-}
-
 function getTicketDetailsByIndexUrl(): string {
-  const fromEnv =
-    typeof process !== "undefined" &&
-    process.env.NEXT_PUBLIC_GET_TICKET_DETAILS_BY_INDEX_URL?.trim()
-      ? process.env.NEXT_PUBLIC_GET_TICKET_DETAILS_BY_INDEX_URL.trim()
-      : undefined;
-  return (
-    fromEnv ??
-    `${getDefaultApiOrigin()}${DEFAULT_TICKET_DETAILS_BY_INDEX_PATH}`
-  ).replace(/\/$/, "");
+  return `${getApiOrigin()}${TICKET_DETAILS_BY_INDEX_PATH}`.replace(/\/$/, "");
 }
 
 function shouldSendUserIdInParams(): boolean {

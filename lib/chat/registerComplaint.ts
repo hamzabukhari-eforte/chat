@@ -3,37 +3,17 @@
  * Used for cascading ticket dropdowns (domain → complaint type, etc.).
  */
 
-const DEFAULT_HTTP_API_ORIGIN = "http://10.0.10.53:8080";
-const DEFAULT_REGISTER_COMPLAINT_VIEW_PATH = "/SES/registercomplaint/view";
-const DEFAULT_GENERATE_COMPLAINT_VIEW_PATH = "/SES/generatecomplaint/view";
+import { getApiOrigin } from "./apiOrigin";
 
-function getDefaultApiOrigin(): string {
-  if (typeof window === "undefined") return DEFAULT_HTTP_API_ORIGIN;
-  return window.location.protocol === "https:"
-    ? window.location.origin
-    : DEFAULT_HTTP_API_ORIGIN;
-}
+const REGISTER_COMPLAINT_VIEW_PATH = "/SES/registercomplaint/view";
+const GENERATE_COMPLAINT_VIEW_PATH = "/SES/generatecomplaint/view";
 
 export function getRegisterComplaintViewUrl(): string {
-  const fromEnv =
-    typeof process !== "undefined" &&
-    process.env.NEXT_PUBLIC_REGISTER_COMPLAINT_VIEW_URL?.trim()
-      ? process.env.NEXT_PUBLIC_REGISTER_COMPLAINT_VIEW_URL.trim()
-      : undefined;
-  return (
-    fromEnv ?? `${getDefaultApiOrigin()}${DEFAULT_REGISTER_COMPLAINT_VIEW_PATH}`
-  ).replace(/\/$/, "");
+  return `${getApiOrigin()}${REGISTER_COMPLAINT_VIEW_PATH}`.replace(/\/$/, "");
 }
 
 export function getGenerateComplaintViewUrl(): string {
-  const fromEnv =
-    typeof process !== "undefined" &&
-    process.env.NEXT_PUBLIC_GENERATE_COMPLAINT_VIEW_URL?.trim()
-      ? process.env.NEXT_PUBLIC_GENERATE_COMPLAINT_VIEW_URL.trim()
-      : undefined;
-  return (
-    fromEnv ?? `${getDefaultApiOrigin()}${DEFAULT_GENERATE_COMPLAINT_VIEW_PATH}`
-  ).replace(/\/$/, "");
+  return `${getApiOrigin()}${GENERATE_COMPLAINT_VIEW_PATH}`.replace(/\/$/, "");
 }
 
 function shouldSendUserIdInParams(): boolean {

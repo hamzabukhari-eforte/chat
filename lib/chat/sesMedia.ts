@@ -1,19 +1,14 @@
+import { getApiOrigin, getDevelopmentSesApiBaseUrl } from "./apiOrigin";
 import type { Attachment } from "./types";
 
 /** Origin for relative paths like `/attachments/chatmedia/...` (no trailing slash). */
 export function getSesMediaOrigin(): string {
-  if (
-    typeof process !== "undefined" &&
-    process.env.NEXT_PUBLIC_SES_MEDIA_ORIGIN?.trim()
-  ) {
-    return process.env.NEXT_PUBLIC_SES_MEDIA_ORIGIN.replace(/\/$/, "");
-  }
-  // Dev: always use the SES media server host.
+  // Dev: SES media files live on the API host (see NEXT_PUBLIC_HTTP_API_ORIGIN).
   if (
     typeof process !== "undefined" &&
     process.env.NODE_ENV === "development"
   ) {
-    return "http://10.0.10.53:8080";
+    return getDevelopmentSesApiBaseUrl();
   }
 
   // Build/production: derive origin from the current browser host.
@@ -23,8 +18,8 @@ export function getSesMediaOrigin(): string {
     return `${protocol}${window.location.host}`.replace(/\/$/, "");
   }
 
-  // Fallback for non-browser contexts.
-  return "http://10.0.10.53:8080";
+  // Fallback for non-browser contexts (e.g. SSR).
+  return getApiOrigin();
 }
 
 /** True when the API already gave a canonical storage path (do not rewrite folder). */

@@ -21,6 +21,7 @@ import {
   binaryChunkCountForFileSize,
   FILE_CHUNK_SIZE_BYTES,
 } from "../lib/chat/fileChunks";
+import { getApiOrigin } from "../lib/chat/apiOrigin";
 import { parseTicketListRows } from "../lib/chat/ticketList";
 import type {
   Attachment,
@@ -38,11 +39,9 @@ import { toast } from "sonner";
  * After JSON file metadata, wait for `{ msg: "R", msgtype: "2" }` before binary chunks.
  * Default off — many SES flows do not ack before binary; enabling avoids hangs when the server
  * never sends `R` after metadata (symptom: only PDFs seemed to work, images/videos never finish).
- * Set `NEXT_PUBLIC_WS_FILE_WAIT_ACK_AFTER_METADATA=1` if your gateway requires the handshake.
+ * Set to true if your gateway requires the handshake.
  */
-const WS_FILE_WAIT_ACK_AFTER_METADATA =
-  typeof process !== "undefined" &&
-  process.env.NEXT_PUBLIC_WS_FILE_WAIT_ACK_AFTER_METADATA === "1";
+const WS_FILE_WAIT_ACK_AFTER_METADATA = false;
 
 /**
  * After each binary chunk, wait for the same ack before the next chunk.
@@ -50,62 +49,35 @@ const WS_FILE_WAIT_ACK_AFTER_METADATA =
  */
 const WS_FILE_WAIT_ACK_AFTER_EACH_CHUNK = false;
 
-const DEFAULT_HTTP_API_ORIGIN = "http://10.0.10.53:8080";
-const DEFAULT_QUEUE_CHATS_PATH =
-  "/SES/SocialMedia/whatsapp/getQueueNAssignedChats";
-const DEFAULT_LOAD_CONVERSATION_PATH =
+const QUEUE_CHATS_PATH = "/SES/SocialMedia/whatsapp/getQueueNAssignedChats";
+const LOAD_CONVERSATION_PATH =
   "/SES/SocialMedia/whatsapp/loadConversationById";
-const DEFAULT_ASSIGN_CHAT_PATH = "/SES/SocialMedia/whatsapp/assignChat";
-const DEFAULT_TRANSFER_CHAT_PATH = "/SES/SocialMedia/whatsapp/transferChat";
-const DEFAULT_CLOSE_CHAT_PATH = "/SES/SocialMedia/whatsapp/closeChat";
-const DEFAULT_TICKET_LIST_BY_CHAT_ID_PATH =
+const ASSIGN_CHAT_PATH = "/SES/SocialMedia/whatsapp/assignChat";
+const TRANSFER_CHAT_PATH = "/SES/SocialMedia/whatsapp/transferChat";
+const CLOSE_CHAT_PATH = "/SES/SocialMedia/whatsapp/closeChat";
+const TICKET_LIST_BY_CHAT_ID_PATH =
   "/SES/SocialMedia/whatsapp/getTicketListByChatId";
-const DEFAULT_CHAT_WS_HOST = "10.0.10.53:8080";
-const DEFAULT_CHAT_WS_PATH = "/SES/WebLiveChat";
-
-function getDefaultApiOrigin(): string {
-  if (typeof window === "undefined") return DEFAULT_HTTP_API_ORIGIN;
-  return window.location.protocol === "https:"
-    ? window.location.origin
-    : DEFAULT_HTTP_API_ORIGIN;
-}
+const CHAT_WS_HOST = "10.0.10.53:8080";
+const CHAT_WS_PATH = "/SES/WebLiveChat";
 
 function getChatWebSocketUrl(): string {
-  const fromEnv =
-    typeof process !== "undefined" && process.env.NEXT_PUBLIC_CHAT_WS_URL
-      ? process.env.NEXT_PUBLIC_CHAT_WS_URL
-      : undefined;
-  if (fromEnv) return fromEnv;
   if (typeof window === "undefined") {
-    return `ws://${DEFAULT_CHAT_WS_HOST}${DEFAULT_CHAT_WS_PATH}`;
+    return `ws://${CHAT_WS_HOST}${CHAT_WS_PATH}`;
   }
   const isHttps = window.location.protocol === "https:";
   if (isHttps) {
     const domain = window.location.hostname;
-    return `wss://${domain}${DEFAULT_CHAT_WS_PATH}`;
+    return `wss://${domain}${CHAT_WS_PATH}`;
   }
-  return `ws://${DEFAULT_CHAT_WS_HOST}${DEFAULT_CHAT_WS_PATH}`;
+  return `ws://${CHAT_WS_HOST}${CHAT_WS_PATH}`;
 }
 
 function getLoadConversationUrl(): string {
-  const fromEnv =
-    typeof process !== "undefined" &&
-    process.env.NEXT_PUBLIC_LOAD_CONVERSATION_URL
-      ? process.env.NEXT_PUBLIC_LOAD_CONVERSATION_URL
-      : undefined;
-  return (
-    fromEnv ?? `${getDefaultApiOrigin()}${DEFAULT_LOAD_CONVERSATION_PATH}`
-  ).replace(/\/$/, "");
+  return `${getApiOrigin()}${LOAD_CONVERSATION_PATH}`.replace(/\/$/, "");
 }
 
 function getQueueChatsUrl(): string {
-  const fromEnv =
-    typeof process !== "undefined" && process.env.NEXT_PUBLIC_QUEUE_CHATS_URL
-      ? process.env.NEXT_PUBLIC_QUEUE_CHATS_URL
-      : undefined;
-  return (
-    fromEnv ?? `${getDefaultApiOrigin()}${DEFAULT_QUEUE_CHATS_PATH}`
-  ).replace(/\/$/, "");
+  return `${getApiOrigin()}${QUEUE_CHATS_PATH}`.replace(/\/$/, "");
 }
 
 function shouldSendUserIdInParams(): boolean {
@@ -119,47 +91,19 @@ function getApiFetchCredentials(): RequestCredentials {
 }
 
 function getAssignChatUrl(): string {
-  const fromEnv =
-    typeof process !== "undefined" && process.env.NEXT_PUBLIC_ASSIGN_CHAT_URL
-      ? process.env.NEXT_PUBLIC_ASSIGN_CHAT_URL
-      : undefined;
-  return (fromEnv ?? `${getDefaultApiOrigin()}${DEFAULT_ASSIGN_CHAT_PATH}`).replace(
-    /\/$/,
-    "",
-  );
+  return `${getApiOrigin()}${ASSIGN_CHAT_PATH}`.replace(/\/$/, "");
 }
 
 function getTransferChatUrl(): string {
-  const fromEnv =
-    typeof process !== "undefined" &&
-    process.env.NEXT_PUBLIC_TRANSFER_CHAT_URL
-      ? process.env.NEXT_PUBLIC_TRANSFER_CHAT_URL
-      : undefined;
-  return (
-    fromEnv ?? `${getDefaultApiOrigin()}${DEFAULT_TRANSFER_CHAT_PATH}`
-  ).replace(/\/$/, "");
+  return `${getApiOrigin()}${TRANSFER_CHAT_PATH}`.replace(/\/$/, "");
 }
 
 function getCloseChatUrl(): string {
-  const fromEnv =
-    typeof process !== "undefined" && process.env.NEXT_PUBLIC_CLOSE_CHAT_URL
-      ? process.env.NEXT_PUBLIC_CLOSE_CHAT_URL
-      : undefined;
-  return (
-    fromEnv ?? `${getDefaultApiOrigin()}${DEFAULT_CLOSE_CHAT_PATH}`
-  ).replace(/\/$/, "");
+  return `${getApiOrigin()}${CLOSE_CHAT_PATH}`.replace(/\/$/, "");
 }
 
 function getTicketListByChatIdUrl(): string {
-  const fromEnv =
-    typeof process !== "undefined" &&
-    process.env.NEXT_PUBLIC_GET_TICKET_LIST_BY_CHAT_ID_URL?.trim()
-      ? process.env.NEXT_PUBLIC_GET_TICKET_LIST_BY_CHAT_ID_URL.trim()
-      : undefined;
-  return (
-    fromEnv ??
-    `${getDefaultApiOrigin()}${DEFAULT_TICKET_LIST_BY_CHAT_ID_PATH}`
-  ).replace(/\/$/, "");
+  return `${getApiOrigin()}${TICKET_LIST_BY_CHAT_ID_PATH}`.replace(/\/$/, "");
 }
 
 interface QueueNAssignedRow {

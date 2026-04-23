@@ -1,24 +1,10 @@
-const DEFAULT_HTTP_API_ORIGIN = "http://10.0.10.53:8080";
-const DEFAULT_CREATE_TICKET_REVIEW_PATH =
+import { getApiOrigin } from "./apiOrigin";
+
+const CREATE_TICKET_REVIEW_PATH =
   "/SES/SocialMedia/whatsapp/createTicketReviewByChatId";
 
-function getDefaultApiOrigin(): string {
-  if (typeof window === "undefined") return DEFAULT_HTTP_API_ORIGIN;
-  return window.location.protocol === "https:"
-    ? window.location.origin
-    : DEFAULT_HTTP_API_ORIGIN;
-}
-
 function getCreateTicketReviewByChatIdUrl(): string {
-  const fromEnv =
-    typeof process !== "undefined" &&
-    process.env.NEXT_PUBLIC_CREATE_TICKET_REVIEW_BY_CHAT_ID_URL?.trim()
-      ? process.env.NEXT_PUBLIC_CREATE_TICKET_REVIEW_BY_CHAT_ID_URL.trim()
-      : undefined;
-  return (
-    fromEnv ??
-    `${getDefaultApiOrigin()}${DEFAULT_CREATE_TICKET_REVIEW_PATH}`
-  ).replace(/\/$/, "");
+  return `${getApiOrigin()}${CREATE_TICKET_REVIEW_PATH}`.replace(/\/$/, "");
 }
 
 function shouldSendUserIdInParams(): boolean {
