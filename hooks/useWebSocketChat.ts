@@ -24,6 +24,7 @@ import {
 import { parseTicketListRows } from "../lib/chat/ticketList";
 import type {
   Attachment,
+  AwayReasonOption,
   Chat,
   CustomerChatTicket,
   Message,
@@ -194,6 +195,8 @@ interface QueueNAssignedChatsResponse {
   emailTemplates?: Record<string, string | number>;
   /** SMS template id (numeric string) → template name. */
   smsTemplates?: Record<string, string | number>;
+  /** Break / away reasons for agent presence (header dropdown). */
+  awayReasons?: unknown;
   queueChats: QueueNAssignedRow[];
   queueCount: number;
   assignedCount: number;
@@ -211,6 +214,7 @@ const QUEUE_RESPONSE_STRUCTURE_KEYS = new Set([
   "userId",
   "userList",
   "domainList",
+  "awayReasons",
 ]);
 
 function parseNumericIdAgentMap(
@@ -332,6 +336,44 @@ function extractTicketSmsTemplatesFromQueueResponse(
   const rows = parseNumericIdAgentMap(raw);
   rows.sort((a, b) => Number(a.id) - Number(b.id));
   return rows;
+}
+
+/** `getQueueNAssignedChats` → `awayReasons`: `[{ reason, id }, ...]`. */
+function extractAwayReasonsFromQueueResponse(data: unknown): AwayReasonOption[] {
+  if (!data || typeof data !== "object" || Array.isArray(data)) return [];
+  const o = data as Record<string, unknown>;
+  let raw: unknown = o.awayReasons;
+  if (
+    !Array.isArray(raw) &&
+    o.data &&
+    typeof o.data === "object" &&
+    !Array.isArray(o.data)
+  ) {
+    raw = (o.data as Record<string, unknown>).awayReasons;
+  }
+  if (!Array.isArray(raw)) return [];
+  const out: AwayReasonOption[] = [];
+  for (const row of raw) {
+    if (!row || typeof row !== "object" || Array.isArray(row)) continue;
+    const o = row as Record<string, unknown>;
+    const idRaw = o.id ?? o.Id ?? o.ID;
+    const id =
+      typeof idRaw === "number" && Number.isFinite(idRaw)
+        ? String(Math.trunc(idRaw))
+        : typeof idRaw === "string"
+          ? idRaw.trim()
+          : "";
+    const reasonRaw = o.reason ?? o.Reason ?? o.name ?? o.Name;
+    const reason =
+      typeof reasonRaw === "string"
+        ? reasonRaw.trim()
+        : typeof reasonRaw === "number" && Number.isFinite(reasonRaw)
+          ? String(reasonRaw)
+          : "";
+    if (!id || !reason) continue;
+    out.push({ id, reason });
+  }
+  return out;
 }
 
 interface BackendWsInitializer {
@@ -796,6 +838,7 @@ async function fetchQueueAndAssignedChats(agent: User): Promise<{
   ticketDomains: { id: string; name: string }[];
   ticketEmailTemplates: { id: string; name: string }[];
   ticketSmsTemplates: { id: string; name: string }[];
+  awayReasons: AwayReasonOption[];
 }> {
   const url = new URL(getQueueChatsUrl());
   if (shouldSendUserIdInParams()) {
@@ -815,6 +858,7 @@ async function fetchQueueAndAssignedChats(agent: User): Promise<{
   const ticketDomains = extractTicketDomainsFromQueueResponse(raw);
   const ticketEmailTemplates = extractTicketEmailTemplatesFromQueueResponse(raw);
   const ticketSmsTemplates = extractTicketSmsTemplatesFromQueueResponse(raw);
+  const awayReasons = extractAwayReasonsFromQueueResponse(raw);
   const queue = (data.queueChats ?? []).map((r) =>
     mapQueueRowToChat(r, "queued"),
   );
@@ -843,6 +887,7 @@ async function fetchQueueAndAssignedChats(agent: User): Promise<{
     ticketDomains,
     ticketEmailTemplates,
     ticketSmsTemplates,
+    awayReasons,
   };
 }
 
@@ -974,6 +1019,8 @@ interface State {
   ticketEmailTemplates: { id: string; name: string }[];
   /** SMS templates from `getQueueNAssignedChats` `smsTemplates`. */
   ticketSmsTemplates: { id: string; name: string }[];
+  /** Away / break reasons from `getQueueNAssignedChats` `awayReasons` (header status). */
+  awayReasons: AwayReasonOption[];
   /** `CHAT_SEEN` can arrive before `NEW_MESSAGE`; apply when a message with that `id` appears. */
   pendingSeenByMsgId: Record<string, 3 | 4>;
   /** True while `getTicketListByChatId` is in flight for the info sidebar. */
@@ -990,6 +1037,7 @@ const initialState: State = {
   ticketDomains: [],
   ticketEmailTemplates: [],
   ticketSmsTemplates: [],
+  awayReasons: [],
   pendingSeenByMsgId: {},
   ticketListLoading: false,
 };
@@ -1316,6 +1364,7 @@ export function useWebSocketChat(currentUser: User | null) {
                     ticketDomains: result.ticketDomains,
                     ticketEmailTemplates: result.ticketEmailTemplates,
                     ticketSmsTemplates: result.ticketSmsTemplates,
+                    awayReasons: result.awayReasons,
                   };
                 }
                 transferToastDedupRef.current[notifyAssignedChatId] = nowMs;
@@ -1342,6 +1391,7 @@ export function useWebSocketChat(currentUser: User | null) {
               ticketDomains: result.ticketDomains,
               ticketEmailTemplates: result.ticketEmailTemplates,
               ticketSmsTemplates: result.ticketSmsTemplates,
+              awayReasons: result.awayReasons,
             };
           });
         })
@@ -2351,6 +2401,7 @@ export function useWebSocketChat(currentUser: User | null) {
     ticketDomains: state.ticketDomains,
     ticketEmailTemplates: state.ticketEmailTemplates,
     ticketSmsTemplates: state.ticketSmsTemplates,
+    awayReasons: state.awayReasons,
     ticketListLoading: state.ticketListLoading,
     startChat,
     claimChat,

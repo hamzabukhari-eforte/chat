@@ -102,7 +102,10 @@ export function AgentDashboard() {
       }
     >
       <div ref={agentHeaderMeasureRef} className="shrink-0">
-        <AgentAppHeader agentName={STATIC_AGENT.name} />
+        <AgentAppHeader
+          agentName={STATIC_AGENT.name}
+          awayReasons={chat.awayReasons}
+        />
       </div>
       <div className="flex min-h-0 flex-1 overflow-hidden">
         {/* <ChannelDrawerSection

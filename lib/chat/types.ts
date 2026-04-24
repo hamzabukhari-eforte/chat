@@ -83,6 +83,12 @@ export type TransferAgentOption = {
   isLoggedIn?: boolean;
 };
 
+/** Away / break reason from `getQueueNAssignedChats` → `awayReasons` (header status). */
+export type AwayReasonOption = {
+  id: string;
+  reason: string;
+};
+
 export interface Chat {
   id: string;
   customer: User;
