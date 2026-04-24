@@ -1062,27 +1062,41 @@ export function TicketDrawerSection({
   return (
     <AnimatePresence>
       {open ? (
-        <motion.aside
-          key="ticket-panel"
-          role="dialog"
-          aria-modal="false"
-          aria-labelledby={titleId}
-          aria-describedby={descriptionId}
-          initial={{ x: "-100%" }}
-          animate={{ x: 0 }}
-          exit={{ x: "-100%" }}
-          transition={{ type: "spring", damping: 32, stiffness: 360 }}
-          style={{
-            top: `var(${AGENT_APP_HEADER_HEIGHT_VAR}, 56px)`,
-            height: `calc(100dvh - var(${AGENT_APP_HEADER_HEIGHT_VAR}, 56px))`,
-            maxHeight: `calc(100dvh - var(${AGENT_APP_HEADER_HEIGHT_VAR}, 56px))`,
-          }}
-          className={cn(
-            "fixed left-0 z-40 flex w-[92vw] max-w-[720px] flex-col bg-white sm:w-[560px] md:w-[640px] lg:w-[720px]",
-            "border-0 border-r border-gray-200 shadow-none",
-          )}
-        >
-          <header className="flex shrink-0 flex-row items-center justify-between gap-2 border-b border-gray-100 p-4 sm:gap-3">
+        <>
+          <motion.div
+            key="ticket-panel-backdrop"
+            initial={{ opacity: 0 }}
+            animate={{ opacity: 1 }}
+            exit={{ opacity: 0 }}
+            transition={{ duration: 0.2, ease: "easeInOut" }}
+            style={{
+              top: `var(${AGENT_APP_HEADER_HEIGHT_VAR}, 56px)`,
+              height: `calc(100dvh - var(${AGENT_APP_HEADER_HEIGHT_VAR}, 56px))`,
+            }}
+            className="pointer-events-none fixed inset-x-0 z-30 bg-black/20 backdrop-blur-sm"
+            aria-hidden
+          />
+          <motion.aside
+            key="ticket-panel"
+            role="dialog"
+            aria-modal="false"
+            aria-labelledby={titleId}
+            aria-describedby={descriptionId}
+            initial={{ x: "-100%" }}
+            animate={{ x: 0 }}
+            exit={{ x: "-100%" }}
+            transition={{ type: "spring", damping: 32, stiffness: 360 }}
+            style={{
+              top: `var(${AGENT_APP_HEADER_HEIGHT_VAR}, 56px)`,
+              height: `calc(100dvh - var(${AGENT_APP_HEADER_HEIGHT_VAR}, 56px))`,
+              maxHeight: `calc(100dvh - var(${AGENT_APP_HEADER_HEIGHT_VAR}, 56px))`,
+            }}
+            className={cn(
+              "fixed left-0 z-40 flex w-[92vw] max-w-[720px] flex-col bg-white sm:w-[560px] md:w-[640px] lg:w-[720px]",
+              "border-0 border-r border-gray-200 shadow-none",
+            )}
+          >
+            <header className="flex shrink-0 flex-row items-center justify-between gap-2 border-b border-gray-100 p-4 sm:gap-3">
             <div className="flex min-w-0 flex-1 items-center gap-2">
               <HiOutlineTicket
                 className="h-5 w-5 shrink-0 text-brand-600"
@@ -1125,26 +1139,27 @@ export function TicketDrawerSection({
             </div>
           </header>
 
-          {drawerView === "list" ? (
-            <TicketDrawerTicketsList
-              agentUserId={agentUserId}
-              chatIndex={chatIndex}
-              cli={customerPhone}
-              tickets={ticketList}
-              loading={ticketsLoading}
-            />
-          ) : (
-            <TicketDrawerFormBody
-              agentUserId={agentUserId}
-              customerPhone={customerPhone}
-              domainOptions={domainOptions}
-              emailTemplateOptions={emailTemplateOptions}
-              smsTemplateOptions={smsTemplateOptions}
-              chatIndex={chatIndex}
-              onOpenChange={onOpenChange}
-            />
-          )}
-        </motion.aside>
+            {drawerView === "list" ? (
+              <TicketDrawerTicketsList
+                agentUserId={agentUserId}
+                chatIndex={chatIndex}
+                cli={customerPhone}
+                tickets={ticketList}
+                loading={ticketsLoading}
+              />
+            ) : (
+              <TicketDrawerFormBody
+                agentUserId={agentUserId}
+                customerPhone={customerPhone}
+                domainOptions={domainOptions}
+                emailTemplateOptions={emailTemplateOptions}
+                smsTemplateOptions={smsTemplateOptions}
+                chatIndex={chatIndex}
+                onOpenChange={onOpenChange}
+              />
+            )}
+          </motion.aside>
+        </>
       ) : null}
     </AnimatePresence>
   );

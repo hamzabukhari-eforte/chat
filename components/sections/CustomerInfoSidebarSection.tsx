@@ -65,7 +65,7 @@ export function CustomerInfoSidebarSection({
   // });
 
   return (
-    <aside className="w-72 min-w-72 bg-white border-l border-gray-200 flex flex-col h-full relative">
+    <aside className="w-full xl:w-72 min-w-72 bg-white border-l border-gray-200 flex flex-col h-full relative">
       {/* Close Button */}
       <button
         type="button"

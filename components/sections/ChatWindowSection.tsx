@@ -19,6 +19,7 @@ import {
   FiFile,
   FiMic,
   FiSearch,
+  FiMoreVertical,
 } from "react-icons/fi";
 import {
   FaFilePdf,
@@ -37,10 +38,7 @@ import {
   isVideoFile,
   voiceClipFileNameForBlob,
 } from "../../lib/chat/fileAttachment";
-import {
-  HiOutlineChatBubbleLeftRight,
-  HiOutlineTicket,
-} from "react-icons/hi2";
+import { HiOutlineChatBubbleLeftRight } from "react-icons/hi2";
 import data from "@emoji-mart/data";
 import Picker from "@emoji-mart/react";
 import { attachmentShouldRenderAsVideo } from "../../lib/chat/attachmentDisplay";
@@ -191,6 +189,7 @@ export function ChatWindowSection({
   >(null);
   const [transferAgentSearch, setTransferAgentSearch] = useState("");
   const [ticketDrawerOpen, setTicketDrawerOpen] = useState(false);
+  const [headerOverflowOpen, setHeaderOverflowOpen] = useState(false);
   const [closeChatConfirmOpen, setCloseChatConfirmOpen] = useState(false);
   const [showEmojiPicker, setShowEmojiPicker] = useState(false);
   const [filePreviews, setFilePreviews] = useState<FilePreview[]>([]);
@@ -203,6 +202,7 @@ export function ChatWindowSection({
   const messagesScrollRef = useRef<HTMLDivElement>(null);
   const draftTextareaRef = useAutoGrowTextarea(draft);
   const transferMenuRef = useRef<HTMLDivElement>(null);
+  const headerOverflowRef = useRef<HTMLDivElement>(null);
 
   useEffect(() => {
     if (!transferMenuOpen) return;
@@ -217,10 +217,23 @@ export function ChatWindowSection({
   }, [transferMenuOpen]);
 
   useEffect(() => {
+    if (!headerOverflowOpen) return;
+    const onPointerDown = (e: PointerEvent) => {
+      const el = headerOverflowRef.current;
+      if (el && !el.contains(e.target as Node)) {
+        setHeaderOverflowOpen(false);
+      }
+    };
+    document.addEventListener("pointerdown", onPointerDown);
+    return () => document.removeEventListener("pointerdown", onPointerDown);
+  }, [headerOverflowOpen]);
+
+  useEffect(() => {
     if (
       !transferQueueConfirmOpen &&
       !transferAgentModalOpen &&
       !transferMenuOpen &&
+      !headerOverflowOpen &&
       !closeChatConfirmOpen
     ) {
       return;
@@ -228,6 +241,7 @@ export function ChatWindowSection({
     const onKeyDown = (e: KeyboardEvent) => {
       if (e.key === "Escape") {
         setTransferMenuOpen(false);
+        setHeaderOverflowOpen(false);
         setTransferQueueConfirmOpen(false);
         setTransferAgentModalOpen(false);
         setCloseChatConfirmOpen(false);
@@ -239,11 +253,14 @@ export function ChatWindowSection({
     transferQueueConfirmOpen,
     transferAgentModalOpen,
     transferMenuOpen,
+    headerOverflowOpen,
     closeChatConfirmOpen,
   ]);
 
   useEffect(() => {
     setCloseChatConfirmOpen(false);
+    setHeaderOverflowOpen(false);
+    setTransferMenuOpen(false);
   }, [activeChat?.id]);
 
   useEffect(() => {
@@ -275,6 +292,7 @@ export function ChatWindowSection({
 
   const openTransferAgentModal = () => {
     setTransferMenuOpen(false);
+    setHeaderOverflowOpen(false);
     setSelectedTransferAgentId(null);
     setTransferAgentSearch("");
     setTransferAgentModalOpen(true);
@@ -457,14 +475,14 @@ export function ChatWindowSection({
 
   if (!activeChat) {
     return (
-      <section className="flex-1 flex flex-col h-full bg-white">
-        <div className="flex-1 flex items-center justify-center text-gray-400">
+      <section className="flex h-full min-h-0 flex-1 flex-col bg-white">
+        <div className="flex flex-1 items-center justify-center text-gray-400">
           <div className="text-center">
-            <HiOutlineChatBubbleLeftRight className="w-16 h-16 mx-auto mb-4 text-gray-300" />
+            <HiOutlineChatBubbleLeftRight className="mx-auto mb-4 h-16 w-16 text-gray-300" />
             <p className="text-lg font-medium text-gray-500">
               Select a chat to start messaging
             </p>
-            <p className="text-sm text-gray-400 mt-1">
+            <p className="mt-1 text-sm text-gray-400">
               Choose from the queue or your active chats
             </p>
           </div>
@@ -481,26 +499,23 @@ export function ChatWindowSection({
   );
 
   return (
-    <section className="flex min-h-0 flex-1 flex-col bg-white min-w-xl">
+    <section className="flex min-h-0 min-w-0 flex-1 flex-col bg-white">
       {/* Header */}
-      <div className="p-4 border-b border-gray-200 flex items-center justify-between shrink-0">
-        <div className="flex items-center gap-3">
-
-          <div className="flex items-center gap-3">
-            <AvatarWithInitials
-              name={customerName}
-              src={activeChat.customer.avatar}
-              size={40}
-              alt={customerName}
-            />
-            <div>
-              <h3 className="text-sm font-semibold text-gray-900">
-                {customerName}
-              </h3>
-              {/* <p className="text-xs text-gray-500">
+      <div className="flex shrink-0 items-center justify-between gap-2 border-b border-gray-200 p-3 sm:p-4">
+        <div className="flex min-w-0 flex-1 items-center gap-2 sm:gap-3">
+          <AvatarWithInitials
+            name={customerName}
+            src={activeChat.customer.avatar}
+            size={40}
+            alt={customerName}
+          />
+          <div className="min-w-0">
+            <h3 className="truncate text-sm font-semibold text-gray-900">
+              {customerName}
+            </h3>
+            {/* <p className="text-xs text-gray-500">
               {getOnlineStatusText(activeChat.customer.onlineStatus)}
             </p> */}
-            </div>
           </div>
           <button
             type="button"
@@ -517,7 +532,7 @@ export function ChatWindowSection({
           </button>
         </div>
 
-        <div className="flex items-center gap-2">
+        <div className="hidden shrink-0 items-center gap-2 xl:flex">
           <div className="relative" ref={transferMenuRef}>
             <button
               type="button"
@@ -526,14 +541,14 @@ export function ChatWindowSection({
               aria-haspopup="menu"
               aria-label="Transfer chat"
               className={
-                "h-8 px-2 flex items-center gap-1.5 rounded-lg border border-gray-200 text-gray-700 text-xs font-medium " +
-                "hover:border-brand-300 hover:bg-brand-50 hover:text-brand-600 transition-colors cursor-pointer"
+                "flex h-8 cursor-pointer items-center gap-1.5 rounded-lg border border-gray-200 px-2 text-xs font-medium text-gray-700 " +
+                "transition-colors hover:border-brand-300 hover:bg-brand-50 hover:text-brand-600"
               }
             >
               Transfer
               <FiChevronDown
                 className={
-                  "w-3 h-3 shrink-0 transition-transform " +
+                  "h-3 w-3 shrink-0 transition-transform " +
                   (transferMenuOpen ? "rotate-180" : "")
                 }
               />
@@ -546,7 +561,7 @@ export function ChatWindowSection({
                 <button
                   type="button"
                   role="menuitem"
-                  className="flex w-full px-3 py-2.5 text-left text-sm text-gray-800 hover:bg-gray-50 cursor-pointer"
+                  className="flex w-full cursor-pointer px-3 py-2.5 text-left text-sm text-gray-800 hover:bg-gray-50"
                   onClick={() => {
                     setTransferMenuOpen(false);
                     setTransferQueueConfirmOpen(true);
@@ -557,7 +572,7 @@ export function ChatWindowSection({
                 <button
                   type="button"
                   role="menuitem"
-                  className="flex w-full px-3 py-2.5 text-left text-sm text-gray-800 hover:bg-gray-50 cursor-pointer"
+                  className="flex w-full cursor-pointer px-3 py-2.5 text-left text-sm text-gray-800 hover:bg-gray-50"
                   onClick={openTransferAgentModal}
                 >
                   Transfer to agent
@@ -571,21 +586,83 @@ export function ChatWindowSection({
             aria-label="Open ticket"
             aria-expanded={ticketDrawerOpen}
             className={
-              "h-8 px-4 flex items-center gap-1.5 rounded-lg border border-gray-200 text-gray-700 text-xs font-medium " +
-              "hover:border-brand-300 hover:bg-brand-50 hover:text-brand-600 transition-colors cursor-pointer"
+              "flex h-8 cursor-pointer items-center gap-1.5 rounded-lg border border-gray-200 px-4 text-xs font-medium text-gray-700 " +
+              "transition-colors hover:border-brand-300 hover:bg-brand-50 hover:text-brand-600"
             }
           >
-            {/* <HiOutlineTicket className="w-4 h-4" /> */}
             Ticket
           </button>
 
           <button
             type="button"
             onClick={() => setCloseChatConfirmOpen(true)}
-            className="px-2 py-2 bg-red-50 text-red-600 rounded-lg text-xs font-medium hover:bg-red-100 transition-colors cursor-pointer"
+            className="cursor-pointer rounded-lg bg-red-50 px-2 py-2 text-xs font-medium text-red-600 transition-colors hover:bg-red-100"
           >
             Close Chat
           </button>
+        </div>
+
+        <div className="relative shrink-0 xl:hidden" ref={headerOverflowRef}>
+          <button
+            type="button"
+            onClick={() => setHeaderOverflowOpen((o) => !o)}
+            aria-expanded={headerOverflowOpen}
+            aria-haspopup="menu"
+            aria-label="Chat actions"
+            className="flex h-9 w-9 cursor-pointer items-center justify-center rounded-lg border border-gray-200 text-gray-700 transition-colors hover:border-brand-300 hover:bg-brand-50 hover:text-brand-600"
+          >
+            <FiMoreVertical className="h-5 w-5" />
+          </button>
+          {headerOverflowOpen ? (
+            <div
+              className="absolute right-0 top-full z-50 mt-1 min-w-[12.5rem] rounded-lg border border-gray-200 bg-white py-1 shadow-lg"
+              role="menu"
+            >
+              <button
+                type="button"
+                role="menuitem"
+                className="flex w-full cursor-pointer px-3 py-2.5 text-left text-sm text-gray-800 hover:bg-gray-50"
+                onClick={() => {
+                  setHeaderOverflowOpen(false);
+                  setTransferQueueConfirmOpen(true);
+                }}
+              >
+                Transfer to queue
+              </button>
+              <button
+                type="button"
+                role="menuitem"
+                className="flex w-full cursor-pointer px-3 py-2.5 text-left text-sm text-gray-800 hover:bg-gray-50"
+                onClick={openTransferAgentModal}
+              >
+                Transfer to agent
+              </button>
+              <div className="my-1 h-px bg-gray-100" role="separator" />
+              <button
+                type="button"
+                role="menuitem"
+                className="flex w-full cursor-pointer px-3 py-2.5 text-left text-sm text-gray-800 hover:bg-gray-50"
+                onClick={() => {
+                  setHeaderOverflowOpen(false);
+                  setTicketDrawerOpen(true);
+                }}
+              >
+                Ticket
+              </button>
+              <div className="my-1 h-px bg-gray-100" role="separator" />
+              <button
+                type="button"
+                role="menuitem"
+                className="flex w-full cursor-pointer px-3 py-2.5 text-left text-sm font-medium text-red-600 hover:bg-red-50"
+                onClick={() => {
+                  setHeaderOverflowOpen(false);
+                  setCloseChatConfirmOpen(true);
+                }}
+              >
+                Close Chat
+              </button>
+            </div>
+          ) : null}
         </div>
       </div>
 
@@ -611,7 +688,7 @@ export function ChatWindowSection({
       {/* Messages */}
       <div
         ref={messagesScrollRef}
-        className="min-h-0 flex-1 space-y-4 overflow-y-auto p-6"
+        className="min-h-0 flex-1 space-y-4 overflow-y-auto p-3 md:p-6"
       >
         {sortedMessages.map((message, index, arr) => {
           const isAgent = message.senderRole === "agent";
@@ -657,7 +734,7 @@ export function ChatWindowSection({
                                   download={getFileBaseName(att.name) || "video"}
                                   target="_blank"
                                   rel="noopener noreferrer"
-                                  className="text-xs font-medium text-brand-600 hover:underline cursor-pointer"
+                                  className="text-xs font-medium text-brand-600 hover:underline cursor-pointer max-w-[80vw] md:max-w-full"
                                 >
                                   Download
                                 </a>
@@ -766,7 +843,7 @@ export function ChatWindowSection({
                                   download={getFileBaseName(att.name) || "video"}
                                   target="_blank"
                                   rel="noopener noreferrer"
-                                  className="text-xs font-medium text-brand-600 hover:underline cursor-pointer"
+                                  className="text-xs font-medium text-brand-600 hover:underline cursor-pointer max-w-[80vw] md:max-w-full"
                                 >
                                   Download
                                 </a>
@@ -853,7 +930,7 @@ export function ChatWindowSection({
       {/* Image preview overlay */}
       {imagePreview && (
         <div
-          className="fixed inset-0 z-50 flex items-center justify-center bg-black/55 p-4"
+          className="fixed inset-0 z-50 flex items-center justify-center bg-black/55 p-4 backdrop-blur-sm"
           role="dialog"
           aria-modal="true"
           onMouseDown={(e) => {
@@ -893,7 +970,7 @@ export function ChatWindowSection({
       {/* Transfer to queue — confirmation */}
       {transferQueueConfirmOpen ? (
         <div
-          className="fixed inset-0 z-[60] flex items-center justify-center bg-black/50 p-4"
+          className="fixed inset-0 z-[60] flex items-center justify-center bg-black/50 p-4 backdrop-blur-sm"
           role="dialog"
           aria-modal="true"
           aria-labelledby="transfer-queue-title"
@@ -935,7 +1012,7 @@ export function ChatWindowSection({
       {/* Close chat — confirmation */}
       {closeChatConfirmOpen ? (
         <div
-          className="fixed inset-0 z-[60] flex items-center justify-center bg-black/50 p-4"
+          className="fixed inset-0 z-[60] flex items-center justify-center bg-black/50 p-4 backdrop-blur-sm"
           role="dialog"
           aria-modal="true"
           aria-labelledby="close-chat-title"
@@ -977,7 +1054,7 @@ export function ChatWindowSection({
       {/* Transfer to agent — pick agent */}
       {transferAgentModalOpen ? (
         <div
-          className="fixed inset-0 z-[60] flex items-center justify-center bg-black/50 p-4"
+          className="fixed inset-0 z-[60] flex items-center justify-center bg-black/50 p-4 backdrop-blur-sm"
           role="dialog"
           aria-modal="true"
           aria-labelledby="transfer-agent-title"
@@ -1150,11 +1227,11 @@ export function ChatWindowSection({
       )}
 
       {/* Input */}
-      <div className="p-4 border-t border-gray-200 shrink-0">
+      <div className="shrink-0 border-t border-gray-200 px-2 py-3 sm:p-4">
         <form onSubmit={handleSubmit}>
-          <div className="flex items-end gap-2">
-            {/* Input Container */}
-            <div className="flex-1 bg-gray-50 border border-gray-200 rounded-xl flex items-center focus-within:border-brand-500 focus-within:ring-1 focus-within:ring-brand-500 transition-all">
+          <div className="flex min-w-0 items-end gap-1.5 sm:gap-2">
+            {/* Input Container — min-w-0 so the row can shrink on ~320px and keep the send button in view */}
+            <div className="flex min-h-[44px] min-w-0 flex-1 items-center rounded-xl border border-gray-200 bg-gray-50 transition-all focus-within:border-brand-500 focus-within:ring-1 focus-within:ring-brand-500">
               {/* File Upload Button */}
               <input
                 ref={fileInputRef}
@@ -1168,10 +1245,10 @@ export function ChatWindowSection({
               <button
                 type="button"
                 onClick={() => fileInputRef.current?.click()}
-                className="p-3 text-gray-400 hover:text-gray-600 transition-colors shrink-0 cursor-pointer"
+                className="shrink-0 cursor-pointer p-2 text-gray-400 transition-colors hover:text-gray-600 sm:p-3"
                 title="Attach file"
               >
-                <FiPaperclip className="w-5 h-5" />
+                <FiPaperclip className="h-5 w-5" />
               </button>
 
               {/* Text Input */}
@@ -1188,7 +1265,7 @@ export function ChatWindowSection({
                     handleSubmit(e);
                   }
                 }}
-                className="flex-1 min-w-0 bg-transparent border-none focus:ring-0 py-3 text-sm resize-none max-h-[150px] min-h-[44px] outline-none text-gray-700"
+                className="max-h-[150px] min-h-[44px] min-w-0 flex-1 resize-none border-none bg-transparent py-2.5 text-sm text-gray-700 outline-none focus:ring-0 sm:py-3"
               />
 
               <ChatAudioRecorder
@@ -1203,21 +1280,21 @@ export function ChatWindowSection({
                   type="button"
                   onClick={() => setShowEmojiPicker(!showEmojiPicker)}
                   className={
-                    "py-3 px-1.5 transition-colors cursor-pointer relative z-10 " +
+                    "relative z-10 cursor-pointer px-1 py-2 transition-colors sm:px-1.5 sm:py-3 " +
                     (showEmojiPicker
                       ? "text-brand-500"
                       : "text-gray-400 hover:text-gray-600")
                   }
                   title="Add emoji"
                 >
-                  <FiSmile className="w-5 h-5" />
+                  <FiSmile className="h-5 w-5" />
                 </button>
 
                 {/* Emoji Picker Popup */}
                 {showEmojiPicker && (
                   <div
                     ref={emojiPickerRef}
-                    className="absolute bottom-12 right-0 z-50 shadow-lg rounded-lg"
+                    className="fixed bottom-20 left-1/2 z-50 w-[calc(100vw-1rem)] max-w-[22rem] -translate-x-1/2 overflow-hidden rounded-lg border border-gray-200 bg-white shadow-lg sm:absolute sm:bottom-12 sm:left-auto sm:right-0 sm:w-[22rem] sm:translate-x-0"
                   >
                     <Picker
                       data={data}
@@ -1226,6 +1303,8 @@ export function ChatWindowSection({
                       previewPosition="none"
                       skinTonePosition="none"
                       maxFrequentRows={2}
+                      dynamicWidth={false}
+                   
                     />
                   </div>
                 )}
@@ -1236,9 +1315,9 @@ export function ChatWindowSection({
             <button
               type="submit"
               disabled={!draft.trim() && filePreviews.length === 0}
-              className="w-11 h-11 bg-brand-600 hover:bg-brand-700 text-white rounded-xl flex items-center justify-center shrink-0 shadow-sm transition-colors disabled:opacity-40 disabled:cursor-not-allowed cursor-pointer"
+              className="flex h-10 w-10 shrink-0 cursor-pointer items-center justify-center rounded-xl bg-brand-600 text-white shadow-sm transition-colors hover:bg-brand-700 disabled:cursor-not-allowed disabled:opacity-40 sm:h-11 sm:w-11"
             >
-              <FiSend className="w-4 h-4" />
+              <FiSend className="h-4 w-4" />
             </button>
           </div>
         </form>

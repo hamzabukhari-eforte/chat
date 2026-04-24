@@ -21,7 +21,7 @@ export function ChatVideoPlayer({ url, className = "", maxWidth = 280 }: Props) 
   if (loadError) {
     return (
       <div
-        className={`flex min-h-[120px] min-w-[200px] max-w-full flex-col items-center justify-center rounded-lg border border-dashed border-gray-300 bg-gray-50 px-3 py-4 text-center ${className}`}
+        className={`flex min-h-[120px] min-w-[200px] max-w-[40vw] md:max-w-full flex-col items-center justify-center rounded-lg border border-dashed border-gray-300 bg-gray-50 px-3 py-4 text-center ${className}`}
         style={{ maxWidth }}
       >
         <p className="text-xs text-gray-600">Could not load video.</p>

@@ -244,7 +244,7 @@ export function ChatAudioRecorderInner({
         disabled={disabled}
         onClick={toggleOpen}
         className={
-          "py-3 px-1.5 transition-colors cursor-pointer " +
+          "cursor-pointer px-1 py-2 transition-colors sm:px-1.5 sm:py-3 " +
           (open
             ? "text-brand-500"
             : "text-gray-400 hover:text-gray-600 disabled:opacity-40 disabled:cursor-not-allowed")
@@ -257,7 +257,7 @@ export function ChatAudioRecorderInner({
       </button>
 
       {open && (
-        <div className="absolute bottom-full right-0 mb-2 z-50 w-[min(100vw-2rem,280px)] rounded-xl border border-gray-200 bg-white p-3 shadow-lg">
+        <div className="fixed bottom-20 left-1/2 z-50 w-[calc(100vw-1rem)] max-w-[22rem] -translate-x-1/2 rounded-xl border border-gray-200 bg-white p-3 shadow-lg sm:absolute sm:bottom-full sm:left-auto sm:right-0 sm:mb-2 sm:w-[min(100vw-2rem,280px)] sm:max-w-[280px] sm:translate-x-0">
           {phase === "ready" && (
             <div className="flex flex-col gap-2">
               <p className="text-xs text-gray-500">Record a voice message</p>

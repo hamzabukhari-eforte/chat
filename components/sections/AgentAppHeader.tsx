@@ -84,11 +84,20 @@ type Props = {
   agentName?: string;
   /** From `getQueueNAssignedChats` → `awayReasons` (break types in status menu). */
   awayReasons?: AwayReasonOption[];
+  /**
+   * When true, the header back control returns to the inbox (queue / my chats)
+   * instead of browser history — used on narrow viewports when a chat is open.
+   */
+  preferInboxNavOnBack?: boolean;
+  /** Required when `preferInboxNavOnBack` is used; opens the inbox pane. */
+  onBackToInbox?: () => void;
 };
 
 export function AgentAppHeader({
   agentName: _agentName,
   awayReasons = [],
+  preferInboxNavOnBack = false,
+  onBackToInbox,
 }: Props) {
   const router = useRouter();
   const [popoverOpen, setPopoverOpen] = useState(false);
@@ -116,8 +125,17 @@ export function AgentAppHeader({
   }, [awayReasons, breakSession]);
 
   const onBack = useCallback(() => {
+    if (preferInboxNavOnBack && onBackToInbox) {
+      onBackToInbox();
+      return;
+    }
     router.back();
-  }, [router]);
+  }, [preferInboxNavOnBack, onBackToInbox, router]);
+
+  const backAriaLabel =
+    preferInboxNavOnBack && onBackToInbox
+      ? "Back to queue and my chats"
+      : "Go back";
 
   const hasOptions = awayReasons.length > 0;
 
@@ -211,7 +229,7 @@ export function AgentAppHeader({
             variant="outline"
             size="icon"
             onClick={onBack}
-            aria-label="Go back"
+            aria-label={backAriaLabel}
             disabled={onBreak}
             className="shrink-0 border-gray-200 text-gray-700 hover:bg-gray-50 h-8 disabled:pointer-events-none disabled:opacity-40"
           >
