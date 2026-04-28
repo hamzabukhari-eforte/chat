@@ -180,6 +180,7 @@ export function AgentDashboard() {
             <ChatSidebarSection
               queue={chat.queue}
               myChats={chat.myChats}
+              isInitialLoading={chat.isInitialLoading}
               showQueue={chat.showQueue}
               activeChatId={chat.activeChatId}
               onSelectChat={handleSelectChat}
@@ -203,6 +204,7 @@ export function AgentDashboard() {
             <ChatWindowSection
               activeChat={chat.activeChat}
               messages={chat.activeMessages}
+              isInitialLoading={chat.isInitialLoading}
               onSendMessage={chat.sendMessage}
               onResolveChat={chat.resolveChat}
               onToggleCustomerInfo={handleToggleCustomerInfo}

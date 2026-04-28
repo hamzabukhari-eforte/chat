@@ -1074,6 +1074,7 @@ interface State {
   chats: Chat[];
   messages: Message[];
   activeChatId: string | null;
+  isInitialLoading: boolean;
   showQueue: boolean;
   domainIndex: number | null;
   chatFrom: number | null;
@@ -1097,6 +1098,7 @@ const initialState: State = {
   chats: [],
   messages: [],
   activeChatId: null,
+  isInitialLoading: true,
   showQueue: false,
   domainIndex: null,
   chatFrom: null,
@@ -1470,6 +1472,11 @@ export function useWebSocketChat(currentUser: User | null) {
         })
         .catch(() => {
           // API optional; WebSocket demo may still update state.
+        })
+        .finally(() => {
+          setState((prev) =>
+            prev.isInitialLoading ? { ...prev, isInitialLoading: false } : prev,
+          );
         });
     },
     [client, currentUser],
@@ -2470,6 +2477,7 @@ export function useWebSocketChat(currentUser: User | null) {
     activeChat,
     activeMessages,
     activeChatId: state.activeChatId,
+    isInitialLoading: state.isInitialLoading,
     showQueue: state.showQueue,
     transferAgents: state.transferAgents,
     ticketDomains: state.ticketDomains,

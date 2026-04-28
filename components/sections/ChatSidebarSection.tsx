@@ -10,6 +10,7 @@ import type { Chat, User } from "../../lib/chat/types";
 interface Props {
   queue: Chat[];
   myChats: Chat[];
+  isInitialLoading?: boolean;
   showQueue: boolean;
   activeChatId: string | null;
   onSelectChat: (chatId: string) => void;
@@ -78,6 +79,7 @@ function ChatActiveDot({ isChatActive }: { isChatActive?: boolean }) {
 export function ChatSidebarSection({
   queue,
   myChats,
+  isInitialLoading = false,
   showQueue,
   activeChatId,
   onSelectChat,
@@ -112,12 +114,63 @@ export function ChatSidebarSection({
     return sortChatsByLatestFirst(filtered);
   }, [myChats, myChatsSearch]);
 
+  if (isInitialLoading) {
+    const SidebarListSkeleton = ({ title }: { title: string }) => (
+      <div className="flex min-h-0 flex-1 flex-col border-gray-200 xl:w-2xs xl:first:border-r">
+        <div className="shrink-0 border-b border-gray-100 p-3 sm:p-4">
+          <div className="mb-3 hidden items-center justify-between xl:flex">
+            <div className="h-3 w-16 animate-pulse rounded bg-gray-100" />
+            <div className="h-5 w-5 animate-pulse rounded-full bg-gray-100" />
+          </div>
+          <div className="relative">
+            <div className="h-9 w-full animate-pulse rounded-md border border-gray-200 bg-gray-50" />
+          </div>
+        </div>
+        <div className="flex-1 space-y-1 overflow-y-auto p-2">
+          {Array.from({ length: 6 }).map((_, index) => (
+            <div
+              key={`${title}-skeleton-row-${index}`}
+              className="flex items-start gap-3 rounded-lg border border-transparent p-3"
+            >
+              <div className="h-10 w-10 animate-pulse rounded-full bg-gray-100" />
+              <div className="min-w-0 flex-1 space-y-2">
+                <div className="h-3 w-2/3 animate-pulse rounded bg-gray-100" />
+                <div className="h-2.5 w-1/2 animate-pulse rounded bg-gray-100" />
+              </div>
+              <div className="h-2.5 w-10 animate-pulse rounded bg-gray-100" />
+            </div>
+          ))}
+        </div>
+      </div>
+    );
+
+    return (
+      <aside
+        className={cn(
+          "flex h-full min-h-0 w-full shrink-0 flex-col border-b border-gray-200 bg-white",
+          "max-xl:flex-1 max-xl:min-h-0",
+          "xl:h-full xl:w-[min(100%,40rem)] xl:min-w-0 xl:flex-row xl:border-b-0 xl:border-r xl:border-gray-200 2xl:w-[min(100%,44rem)]",
+        )}
+      >
+        <div className="flex shrink-0 border-b border-gray-100 bg-white xl:hidden">
+          <div className="flex min-h-11 flex-1 items-center justify-center border-b-2 border-transparent px-3">
+            <div className="h-3 w-14 animate-pulse rounded bg-gray-100" />
+          </div>
+        </div>
+        <div className="flex min-h-0 min-w-0 flex-1 flex-col xl:flex-row">
+          {showQueue ? <SidebarListSkeleton title="queue" /> : null}
+          <SidebarListSkeleton title="my" />
+        </div>
+      </aside>
+    );
+  }
+
   return (
     <aside
       className={cn(
         "flex h-full min-h-0 w-full shrink-0 flex-col border-b border-gray-200 bg-white",
         "max-xl:flex-1 max-xl:min-h-0",
-        "xl:h-full xl:w-[min(100%,40rem)] xl:min-w-0 xl:flex-row xl:border-b-0 xl:border-r xl:border-gray-200 2xl:w-180",
+        "xl:h-full xl:w-[min(100%,40rem)] xl:min-w-0 xl:flex-row xl:border-b-0 xl:border-r xl:border-gray-200 2xl:w-[min(100%,44rem)]",
       )}
     >
       <div

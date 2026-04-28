@@ -61,6 +61,7 @@ import type {
 interface Props {
   activeChat: Chat | null;
   messages: Message[];
+  isInitialLoading?: boolean;
   onSendMessage: (
     text: string,
     attachments?: Attachment[],
@@ -164,6 +165,7 @@ function getFileIcon(ext: string, className: string) {
 export function ChatWindowSection({
   activeChat,
   messages,
+  isInitialLoading = false,
   onSendMessage,
   onResolveChat,
   onToggleCustomerInfo,
@@ -472,6 +474,20 @@ export function ChatWindowSection({
     setFilePreviews([]);
     setShowEmojiPicker(false);
   };
+
+  if (isInitialLoading) {
+    return (
+      <section className="flex min-h-0 min-w-0 flex-1 flex-col bg-white">
+        <div className="flex min-h-0 flex-1 items-center justify-center p-6">
+          <div className="flex w-full max-w-xs flex-col items-center">
+            <div className="mb-4 h-14 w-14 animate-pulse rounded-2xl bg-gray-100" />
+            <div className="h-4 w-52 animate-pulse rounded bg-gray-100" />
+            <div className="mt-2 h-3 w-44 animate-pulse rounded bg-gray-100" />
+          </div>
+        </div>
+      </section>
+    );
+  }
 
   if (!activeChat) {
     return (
