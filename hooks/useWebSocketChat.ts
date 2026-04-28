@@ -61,6 +61,8 @@ const DEFAULT_TRANSFER_CHAT_PATH = "/SES/SocialMedia/whatsapp/transferChat";
 const DEFAULT_CLOSE_CHAT_PATH = "/SES/SocialMedia/whatsapp/closeChat";
 const DEFAULT_TICKET_LIST_BY_CHAT_ID_PATH =
   "/SES/SocialMedia/whatsapp/getTicketListByChatId";
+const DEFAULT_AUTO_ASSIGNMENT_STATUS_PATH =
+  "/SES/SocialMedia/whatsapp/getAutoAssignmentStatus";
 const DEFAULT_CHAT_WS_HOST = "10.0.10.53:8080";
 const DEFAULT_CHAT_WS_PATH = "/SES/WebLiveChat";
 
@@ -161,6 +163,69 @@ function getTicketListByChatIdUrl(): string {
     fromEnv ??
     `${getDefaultApiOrigin()}${DEFAULT_TICKET_LIST_BY_CHAT_ID_PATH}`
   ).replace(/\/$/, "");
+}
+
+function getAutoAssignmentStatusUrl(): string {
+  const fromEnv =
+    typeof process !== "undefined" &&
+    process.env.NEXT_PUBLIC_AUTO_ASSIGNMENT_STATUS_URL?.trim()
+      ? process.env.NEXT_PUBLIC_AUTO_ASSIGNMENT_STATUS_URL.trim()
+      : undefined;
+  return (
+    fromEnv ?? `${getDefaultApiOrigin()}${DEFAULT_AUTO_ASSIGNMENT_STATUS_PATH}`
+  ).replace(/\/$/, "");
+}
+
+function parseLooseBoolean(raw: unknown): boolean | null {
+  if (typeof raw === "boolean") return raw;
+  if (typeof raw === "number") {
+    if (raw === 1) return true;
+    if (raw === 0) return false;
+  }
+  if (typeof raw === "string") {
+    const normalized = raw.trim().toLowerCase();
+    if (normalized === "true" || normalized === "1") return true;
+    if (normalized === "false" || normalized === "0") return false;
+  }
+  return null;
+}
+
+function extractAutoAssignmentEnabled(json: unknown): boolean {
+  if (!json || typeof json !== "object" || Array.isArray(json)) return false;
+  const root = json as Record<string, unknown>;
+  const fromRoot = parseLooseBoolean(root.isAutoAssignmentEnabled);
+  if (fromRoot !== null) return fromRoot;
+
+  const data = root.data;
+  if (data && typeof data === "object" && !Array.isArray(data)) {
+    const fromData = parseLooseBoolean(
+      (data as Record<string, unknown>).isAutoAssignmentEnabled,
+    );
+    if (fromData !== null) return fromData;
+  }
+
+  const result = root.result;
+  if (result && typeof result === "object" && !Array.isArray(result)) {
+    const fromResult = parseLooseBoolean(
+      (result as Record<string, unknown>).isAutoAssignmentEnabled,
+    );
+    if (fromResult !== null) return fromResult;
+  }
+  return false;
+}
+
+async function fetchAutoAssignmentStatus(userId: string): Promise<boolean> {
+  const url = new URL(getAutoAssignmentStatusUrl());
+  url.searchParams.set("Userid", userId);
+  const res = await fetch(url.toString(), {
+    method: "POST",
+    credentials: getApiFetchCredentials(),
+  });
+  if (!res.ok) {
+    throw new Error(`getAutoAssignmentStatus failed: ${res.status}`);
+  }
+  const json: unknown = await res.json();
+  return extractAutoAssignmentEnabled(json);
 }
 
 interface QueueNAssignedRow {
@@ -1009,6 +1074,7 @@ interface State {
   chats: Chat[];
   messages: Message[];
   activeChatId: string | null;
+  showQueue: boolean;
   domainIndex: number | null;
   chatFrom: number | null;
   /** Agent id → display name from getQueueNAssignedChats `userList` (or legacy top-level numeric keys). */
@@ -1031,6 +1097,7 @@ const initialState: State = {
   chats: [],
   messages: [],
   activeChatId: null,
+  showQueue: false,
   domainIndex: null,
   chatFrom: null,
   transferAgents: [],
@@ -1331,8 +1398,12 @@ export function useWebSocketChat(currentUser: User | null) {
     }) => {
       const agentId = currentUser?.id;
       if (!agentId || currentUser.role !== "agent") return;
-      fetchQueueAndAssignedChats(currentUser)
-        .then((result) => {
+      Promise.all([
+        fetchQueueAndAssignedChats(currentUser),
+        fetchAutoAssignmentStatus(currentUser.id).catch(() => false),
+      ])
+        .then(([result, isAutoAssignmentEnabled]) => {
+          const showQueue = !isAutoAssignmentEnabled;
           client.setInitializer(result.initializer);
           setState((prev) => {
             const nextChats = mergeChatsById(prev.chats, result.chats);
@@ -1358,6 +1429,7 @@ export function useWebSocketChat(currentUser: User | null) {
                   return {
                     ...prev,
                     chats: nextChats,
+                    showQueue,
                     domainIndex: result.domainIndex ?? prev.domainIndex,
                     chatFrom: result.chatFrom ?? prev.chatFrom,
                     transferAgents: result.transferAgents,
@@ -1385,6 +1457,7 @@ export function useWebSocketChat(currentUser: User | null) {
             return {
               ...prev,
               chats: nextChats,
+              showQueue,
               domainIndex: result.domainIndex ?? prev.domainIndex,
               chatFrom: result.chatFrom ?? prev.chatFrom,
               transferAgents: result.transferAgents,
@@ -2397,6 +2470,7 @@ export function useWebSocketChat(currentUser: User | null) {
     activeChat,
     activeMessages,
     activeChatId: state.activeChatId,
+    showQueue: state.showQueue,
     transferAgents: state.transferAgents,
     ticketDomains: state.ticketDomains,
     ticketEmailTemplates: state.ticketEmailTemplates,

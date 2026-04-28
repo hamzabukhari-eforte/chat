@@ -1,6 +1,6 @@
 "use client";
 
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { FiArrowRight, FiSearch } from "react-icons/fi";
 import { cn } from "@/lib/utils";
 import { sortChatsByLatestFirst } from "../../lib/chat/chatSort";
@@ -10,6 +10,7 @@ import type { Chat, User } from "../../lib/chat/types";
 interface Props {
   queue: Chat[];
   myChats: Chat[];
+  showQueue: boolean;
   activeChatId: string | null;
   onSelectChat: (chatId: string) => void;
   onClaimChat: (chatId: string) => void;
@@ -77,6 +78,7 @@ function ChatActiveDot({ isChatActive }: { isChatActive?: boolean }) {
 export function ChatSidebarSection({
   queue,
   myChats,
+  showQueue,
   activeChatId,
   onSelectChat,
   onClaimChat,
@@ -86,7 +88,15 @@ export function ChatSidebarSection({
 }: Props) {
   const [queueSearch, setQueueSearch] = useState("");
   const [myChatsSearch, setMyChatsSearch] = useState("");
-  const [listTab, setListTab] = useState<"queue" | "my">("my");
+  const [listTab, setListTab] = useState<"queue" | "my">(
+    showQueue ? "queue" : "my",
+  );
+
+  useEffect(() => {
+    if (!showQueue && listTab === "queue") {
+      setListTab("my");
+    }
+  }, [showQueue, listTab]);
 
   const sortedQueue = useMemo(() => {
     const filtered = queue.filter((chat) =>
@@ -115,30 +125,32 @@ export function ChatSidebarSection({
         role="tablist"
         aria-label="Inbox lists"
       >
-        <button
-          type="button"
-          role="tab"
-          aria-selected={listTab === "queue"}
-          onClick={() => setListTab("queue")}
-          className={cn(
-            "flex min-h-11 flex-1 cursor-pointer items-center justify-center gap-2 border-b-2 px-3 text-sm font-semibold transition-colors",
-            listTab === "queue"
-              ? "border-brand-600 text-brand-700"
-              : "cursor-pointer border-transparent text-gray-500 hover:text-gray-800",
-          )}
-        >
-          Queue
-          <span
+        {showQueue ? (
+          <button
+            type="button"
+            role="tab"
+            aria-selected={listTab === "queue"}
+            onClick={() => setListTab("queue")}
             className={cn(
-              "rounded-full px-2 py-0.5 text-xs font-medium",
+              "flex min-h-11 flex-1 cursor-pointer items-center justify-center gap-2 border-b-2 px-3 text-sm font-semibold transition-colors",
               listTab === "queue"
-                ? "bg-brand-100 text-brand-700"
-                : "bg-gray-200 text-gray-600",
+                ? "border-brand-600 text-brand-700"
+                : "cursor-pointer border-transparent text-gray-500 hover:text-gray-800",
             )}
           >
-            {queue.length}
-          </span>
-        </button>
+            Queue
+            <span
+              className={cn(
+                "rounded-full px-2 py-0.5 text-xs font-medium",
+                listTab === "queue"
+                  ? "bg-brand-100 text-brand-700"
+                  : "bg-gray-200 text-gray-600",
+              )}
+            >
+              {queue.length}
+            </span>
+          </button>
+        ) : null}
         <button
           type="button"
           role="tab"
@@ -185,12 +197,13 @@ export function ChatSidebarSection({
 
       <div className="flex min-h-0 min-w-0 flex-1 flex-col xl:flex-row">
       {/* Queue Column */}
-      <div
-        className={cn(
-          "flex min-h-0 flex-col border-gray-200 xl:w-1/2 xl:border-r",
-          listTab === "queue" ? "flex flex-1 xl:flex-none" : "hidden xl:flex",
-        )}
-      >
+      {showQueue ? (
+        <div
+          className={cn(
+            "flex min-h-0 flex-col border-gray-200 xl:w-1/2 xl:border-r",
+            listTab === "queue" ? "flex flex-1 xl:flex-none" : "hidden xl:flex",
+          )}
+        >
         <div className="shrink-0 border-b border-gray-100 p-3 sm:p-4">
           <div className="mb-3 hidden items-center justify-between xl:flex">
             <h3 className="text-sm font-semibold text-gray-700">Queue</h3>
@@ -264,12 +277,14 @@ export function ChatSidebarSection({
             </div>
           )}
         </div>
-      </div>
+        </div>
+      ) : null}
 
       {/* My Chats Column */}
       <div
         className={cn(
-          "flex min-h-0 flex-col border-gray-200 xl:w-1/2",
+          "flex min-h-0 flex-col border-gray-200",
+          showQueue ? "xl:w-1/2" : "xl:w-full",
           listTab === "my" ? "flex flex-1 xl:flex-none" : "hidden xl:flex",
         )}
       >

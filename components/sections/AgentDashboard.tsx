@@ -180,6 +180,7 @@ export function AgentDashboard() {
             <ChatSidebarSection
               queue={chat.queue}
               myChats={chat.myChats}
+              showQueue={chat.showQueue}
               activeChatId={chat.activeChatId}
               onSelectChat={handleSelectChat}
               onClaimChat={chat.claimChat}
