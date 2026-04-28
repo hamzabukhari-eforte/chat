@@ -149,7 +149,9 @@ export function ChatSidebarSection({
         className={cn(
           "flex h-full min-h-0 w-full shrink-0 flex-col border-b border-gray-200 bg-white",
           "max-xl:flex-1 max-xl:min-h-0",
-          "xl:h-full xl:w-[min(100%,40rem)] xl:min-w-0 xl:flex-row xl:border-b-0 xl:border-r xl:border-gray-200 2xl:w-[min(100%,44rem)]",
+          showQueue
+            ? "xl:h-full xl:w-[min(100%,40rem)] xl:min-w-0 xl:flex-row xl:border-b-0 xl:border-r xl:border-gray-200 2xl:w-[min(100%,40rem)]"
+            : "xl:h-full xl:w-[min(100%,420px)] xl:min-w-0 xl:flex-row xl:border-b-0 xl:border-r xl:border-gray-200 2xl:w-[min(100%,420px)]",
         )}
       >
         <div className="flex shrink-0 border-b border-gray-100 bg-white xl:hidden">
@@ -170,7 +172,9 @@ export function ChatSidebarSection({
       className={cn(
         "flex h-full min-h-0 w-full shrink-0 flex-col border-b border-gray-200 bg-white",
         "max-xl:flex-1 max-xl:min-h-0",
-        "xl:h-full xl:w-[min(100%,40rem)] xl:min-w-0 xl:flex-row xl:border-b-0 xl:border-r xl:border-gray-200 2xl:w-[min(100%,44rem)]",
+        showQueue
+          ? "xl:h-full xl:w-[min(100%,40rem)] xl:min-w-0 xl:flex-row xl:border-b-0 xl:border-r xl:border-gray-200 2xl:w-180"
+          : "xl:h-full xl:w-[min(100%,420px)] xl:min-w-0 xl:flex-row xl:border-b-0 xl:border-r xl:border-gray-200 2xl:w-[400px]",
       )}
     >
       <div
@@ -253,7 +257,7 @@ export function ChatSidebarSection({
       {showQueue ? (
         <div
           className={cn(
-            "flex min-h-0 flex-col border-gray-200 xl:w-1/2 xl:border-r",
+            "flex min-h-0 flex-col border-gray-200 xl:w-1/2 xl:border-r max-w-[400px]",
             listTab === "queue" ? "flex flex-1 xl:flex-none" : "hidden xl:flex",
           )}
         >
@@ -336,7 +340,7 @@ export function ChatSidebarSection({
       {/* My Chats Column */}
       <div
         className={cn(
-          "flex min-h-0 flex-col border-gray-200",
+          "flex min-h-0 flex-col border-gray-200 max-w-[400px]",
           showQueue ? "xl:w-1/2" : "xl:w-full",
           listTab === "my" ? "flex flex-1 xl:flex-none" : "hidden xl:flex",
         )}
