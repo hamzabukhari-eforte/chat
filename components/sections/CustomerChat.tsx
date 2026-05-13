@@ -19,41 +19,22 @@ import { attachmentShouldRenderAsVideo } from "../../lib/chat/attachmentDisplay"
 import { stableMessageListKey } from "../../lib/chat/messageKey";
 import { formatMessageTimeLabelFromMessage } from "../../lib/chat/sesMessageTime";
 import type { Attachment, Message, User } from "../../lib/chat/types";
+import type { ComposerFilePreview } from "../../lib/chat/composerAttachments";
 import { ExpandableMessageText } from "../atoms/ExpandableMessageText";
 import { ChatAudioRecorder } from "../atoms/ChatAudioRecorder";
 import { ChatVideoPlayer } from "../atoms/ChatVideoPlayer";
 import {
-  isVideoFile,
   voiceClipFileNameForBlob,
 } from "../../lib/chat/fileAttachment";
-
-const ACCEPTED_IMAGE_TYPES = "image/jpeg,image/png,image/gif,image/webp";
-const ACCEPTED_VIDEO_TYPES = "video/mp4,video/quicktime,video/webm";
-const ACCEPTED_DOC_TYPES = ".pdf,.doc,.docx,.txt,.xls,.xlsx,.csv";
-
-interface FilePreview {
-  id: string;
-  file: File;
-  type: "image" | "video" | "document" | "audio";
-  previewUrl?: string;
-}
-
-function formatFileSize(bytes: number): string {
-  if (bytes < 1024) return bytes + " B";
-  if (bytes < 1024 * 1024) return (bytes / 1024).toFixed(1) + " KB";
-  return (bytes / (1024 * 1024)).toFixed(1) + " MB";
-}
-
-function fileBaseName(fullName: string): string {
-  const n = (fullName || "").trim();
-  if (!n) return "";
-  const parts = n.split(/[\\/]/);
-  return parts[parts.length - 1] || n;
-}
-
-function revokeBlobPreviewUrl(url: string | undefined) {
-  if (url?.startsWith("blob:")) URL.revokeObjectURL(url);
-}
+import {
+  ACCEPTED_UPLOAD_TYPES,
+  blobToDataUrl,
+  createFilePreview,
+  formatFileSize,
+  getFileBaseName,
+  previewsToAttachments,
+  revokeBlobPreviewUrl,
+} from "../../lib/chat/composerAttachments";
 
 function MessageAttachments({ message }: { message: Message }) {
   if (!message.attachments?.length) return null;
@@ -62,7 +43,7 @@ function MessageAttachments({ message }: { message: Message }) {
     if (!att.url) return;
     const link = document.createElement("a");
     link.href = att.url;
-    link.download = fileBaseName(att.name) || "download";
+    link.download = getFileBaseName(att.name) || "download";
     link.rel = "noopener noreferrer";
     link.target = "_blank";
     document.body.appendChild(link);
@@ -79,7 +60,7 @@ function MessageAttachments({ message }: { message: Message }) {
               <ChatVideoPlayer url={att.url} maxWidth={280} />
               <a
                 href={att.url}
-                download={fileBaseName(att.name) || "video"}
+                download={getFileBaseName(att.name) || "video"}
                 target="_blank"
                 rel="noopener noreferrer"
                 className="text-xs font-medium text-brand-600 hover:underline cursor-pointer"
@@ -92,7 +73,7 @@ function MessageAttachments({ message }: { message: Message }) {
               href={att.url}
               target="_blank"
               rel="noopener noreferrer"
-              download={fileBaseName(att.name) || "image"}
+              download={getFileBaseName(att.name) || "image"}
               className="relative block h-[150px] w-[200px] cursor-pointer overflow-hidden rounded-lg hover:opacity-90 transition-opacity"
             >
               <Image
@@ -143,7 +124,7 @@ export function CustomerChat() {
 
   const [draft, setDraft] = useState("");
   const [showEmojiPicker, setShowEmojiPicker] = useState(false);
-  const [filePreviews, setFilePreviews] = useState<FilePreview[]>([]);
+  const [filePreviews, setFilePreviews] = useState<ComposerFilePreview[]>([]);
   const fileInputRef = useRef<HTMLInputElement>(null);
   const emojiPickerRef = useRef<HTMLDivElement>(null);
   const messagesScrollRef = useRef<HTMLDivElement>(null);
@@ -166,42 +147,15 @@ export function CustomerChat() {
     });
   }, [chat.activeChat?.id, chat.activeMessages.length, messagesTailKey]);
 
-  const fileToBase64 = (file: File): Promise<string> =>
-    new Promise((resolve, reject) => {
-      const reader = new FileReader();
-      reader.readAsDataURL(file);
-      reader.onload = () => resolve(reader.result as string);
-      reader.onerror = (error) => reject(error);
-    });
-
   const handleFileSelect = async (
     event: React.ChangeEvent<HTMLInputElement>,
   ) => {
     const files = event.target.files;
     if (!files) return;
 
-    const newPreviews: FilePreview[] = [];
+    const newPreviews: ComposerFilePreview[] = [];
     for (const file of Array.from(files)) {
-      const isImage = file.type.startsWith("image/");
-      const isVideo = isVideoFile(file);
-      const isAudio = file.type.startsWith("audio/");
-      const preview: FilePreview = {
-        id: Math.random().toString(36).substring(7),
-        file,
-        type: isImage
-          ? "image"
-          : isVideo
-            ? "video"
-            : isAudio
-              ? "audio"
-              : "document",
-      };
-      if (isImage || isVideo) {
-        preview.previewUrl = await fileToBase64(file);
-      } else {
-        preview.previewUrl = URL.createObjectURL(file);
-      }
-      newPreviews.push(preview);
+      newPreviews.push(await createFilePreview(file));
     }
     setFilePreviews((prev) => [...prev, ...newPreviews]);
     if (fileInputRef.current) fileInputRef.current.value = "";
@@ -214,14 +168,6 @@ export function CustomerChat() {
       return prev.filter((p) => p.id !== id);
     });
   };
-
-  const blobToDataUrl = (blob: Blob): Promise<string> =>
-    new Promise((resolve, reject) => {
-      const reader = new FileReader();
-      reader.onloadend = () => resolve(reader.result as string);
-      reader.onerror = () => reject(reader.error);
-      reader.readAsDataURL(blob);
-    });
 
   const handleVoiceRecordingComplete = async (blob: Blob) => {
     const url = await blobToDataUrl(blob);
@@ -250,14 +196,7 @@ export function CustomerChat() {
     const text = draft.trim();
     if (!text && filePreviews.length === 0) return;
 
-    const attachments: Attachment[] = filePreviews.map((fp) => ({
-      id: fp.id,
-      type: fp.type,
-      name: fp.file.name,
-      url: fp.previewUrl || "",
-      size: fp.file.size,
-      mimeType: fp.file.type,
-    }));
+    const attachments: Attachment[] = previewsToAttachments(filePreviews);
 
     const payload =
       attachments.length > 0 ? attachments : undefined;
@@ -404,7 +343,7 @@ export function CustomerChat() {
               ref={fileInputRef}
               type="file"
               multiple
-              accept={`${ACCEPTED_IMAGE_TYPES},${ACCEPTED_VIDEO_TYPES},${ACCEPTED_DOC_TYPES}`}
+              accept={ACCEPTED_UPLOAD_TYPES}
               onChange={handleFileSelect}
               className="hidden"
               id="customer-file-upload"

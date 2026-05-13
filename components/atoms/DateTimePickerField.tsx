@@ -56,6 +56,23 @@ function mergeTimeOntoDate(base: Date, timeStr: string): Date {
   return out;
 }
 
+function startOfLocalDay(d: Date): Date {
+  return new Date(d.getFullYear(), d.getMonth(), d.getDate());
+}
+
+function isSameLocalDay(a: Date, b: Date): boolean {
+  return startOfLocalDay(a).getTime() === startOfLocalDay(b).getTime();
+}
+
+function isFutureLocalCalendarDay(date: Date): boolean {
+  return startOfLocalDay(date) > startOfLocalDay(new Date());
+}
+
+function clampDateTimeToNow(d: Date): Date {
+  const now = new Date();
+  return d > now ? now : d;
+}
+
 type Props = {
   id: string;
   label: string;
@@ -63,6 +80,8 @@ type Props = {
   value: string;
   onChange: (formatted: string) => void;
   className?: string;
+  /** When true, calendar days after today and date-times after "now" are not allowed. */
+  disableFuture?: boolean;
 };
 
 /** Tallest we allow the popover; lane below/above trigger is usually smaller. */
@@ -102,14 +121,24 @@ export function DateTimePickerField({
   value,
   onChange,
   className,
+  disableFuture = false,
 }: Props) {
   const [open, setOpen] = React.useState(false);
   const [pickerLayout, setPickerLayout] = React.useState<PickerLayout>(() =>
     computePickerLayout(null),
   );
-  const [draft, setDraft] = React.useState<Date>(
-    () => parseTicketDateTimeLocal(value) ?? new Date(),
-  );
+  const [draft, setDraft] = React.useState<Date>(() => {
+    let d = parseTicketDateTimeLocal(value) ?? new Date();
+    if (disableFuture) d = clampDateTimeToNow(d);
+    return d;
+  });
+
+  React.useEffect(() => {
+    if (!disableFuture) return;
+    const parsed = parseTicketDateTimeLocal(value);
+    if (!parsed || parsed <= new Date()) return;
+    onChange(formatTicketDateTimeLocal(new Date()));
+  }, [disableFuture, value, onChange]);
 
   const syncPickerLayout = React.useCallback(() => {
     const el =
@@ -133,7 +162,9 @@ export function DateTimePickerField({
   const handleOpenChange = (next: boolean) => {
     setOpen(next);
     if (next) {
-      setDraft(parseTicketDateTimeLocal(value) ?? new Date());
+      let d = parseTicketDateTimeLocal(value) ?? new Date();
+      if (disableFuture) d = clampDateTimeToNow(d);
+      setDraft(d);
     }
   };
 
@@ -190,9 +221,11 @@ export function DateTimePickerField({
                 selected={draft}
                 onSelect={(d) => {
                   if (!d) return;
-                  const next = mergeTimeOntoDate(d, timeValueForInput(draft));
+                  let next = mergeTimeOntoDate(d, timeValueForInput(draft));
+                  if (disableFuture) next = clampDateTimeToNow(next);
                   commit(next);
                 }}
+                disabled={disableFuture ? isFutureLocalCalendarDay : undefined}
                 className="mx-auto [--rdp-accent-color:#4338ca] [--rdp-accent-background-color:#eef2ff]"
               />
             </CardContent>
@@ -206,8 +239,15 @@ export function DateTimePickerField({
                       type="time"
                       step="1"
                       value={timeValueForInput(draft)}
+                      max={
+                        disableFuture && isSameLocalDay(draft, new Date())
+                          ? timeValueForInput(new Date())
+                          : undefined
+                      }
                       onChange={(e) => {
-                        commit(mergeTimeOntoDate(draft, e.target.value));
+                        let next = mergeTimeOntoDate(draft, e.target.value);
+                        if (disableFuture) next = clampDateTimeToNow(next);
+                        commit(next);
                       }}
                       className="appearance-none [&::-webkit-calendar-picker-indicator]:hidden [&::-webkit-calendar-picker-indicator]:appearance-none"
                     />
@@ -222,7 +262,8 @@ export function DateTimePickerField({
                 size="sm"
                 className="w-full"
                 onClick={() => {
-                  commit(draft);
+                  const next = disableFuture ? clampDateTimeToNow(draft) : draft;
+                  commit(next);
                   setOpen(false);
                 }}
               >

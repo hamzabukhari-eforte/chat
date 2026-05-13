@@ -6,6 +6,8 @@ import { cn } from "@/lib/utils";
 import { sortChatsByLatestFirst } from "../../lib/chat/chatSort";
 import { AvatarWithInitials } from "../atoms/AvatarWithInitials";
 import type { Chat, User } from "../../lib/chat/types";
+import { ChatSidebarTabs } from "./chat-sidebar/ChatSidebarTabs";
+import { ChatListColumn } from "./chat-sidebar/ChatListColumn";
 
 interface Props {
   queue: Chat[];
@@ -177,62 +179,13 @@ export function ChatSidebarSection({
           : "xl:h-full xl:w-[min(100%,420px)] xl:min-w-0 xl:flex-row xl:border-b-0 xl:border-r xl:border-gray-200 2xl:w-[400px]",
       )}
     >
-      <div
-        className="flex shrink-0 border-b border-gray-100 bg-white xl:hidden"
-        role="tablist"
-        aria-label="Inbox lists"
-      >
-        {showQueue ? (
-          <button
-            type="button"
-            role="tab"
-            aria-selected={listTab === "queue"}
-            onClick={() => setListTab("queue")}
-            className={cn(
-              "flex min-h-11 flex-1 cursor-pointer items-center justify-center gap-2 border-b-2 px-3 text-sm font-semibold transition-colors",
-              listTab === "queue"
-                ? "border-brand-600 text-brand-700"
-                : "cursor-pointer border-transparent text-gray-500 hover:text-gray-800",
-            )}
-          >
-            Queue
-            <span
-              className={cn(
-                "rounded-full px-2 py-0.5 text-xs font-medium",
-                listTab === "queue"
-                  ? "bg-brand-100 text-brand-700"
-                  : "bg-gray-200 text-gray-600",
-              )}
-            >
-              {queue.length}
-            </span>
-          </button>
-        ) : null}
-        <button
-          type="button"
-          role="tab"
-          aria-selected={listTab === "my"}
-          onClick={() => setListTab("my")}
-          className={cn(
-            "flex min-h-11 flex-1 cursor-pointer items-center justify-center gap-2 border-b-2 px-3 text-sm font-semibold transition-colors",
-            listTab === "my"
-              ? "border-brand-600 text-brand-700"
-              : "cursor-pointer border-transparent text-gray-500 hover:text-gray-800",
-          )}
-        >
-          My Chats
-          <span
-            className={cn(
-              "rounded-full px-2 py-0.5 text-xs font-medium",
-              listTab === "my"
-                ? "bg-brand-100 text-brand-700"
-                : "bg-gray-200 text-gray-600",
-            )}
-          >
-            {myChats.length}
-          </span>
-        </button>
-      </div>
+      <ChatSidebarTabs
+        showQueue={showQueue}
+        listTab={listTab}
+        queueCount={queue.length}
+        myChatsCount={myChats.length}
+        onTabChange={setListTab}
+      />
 
       {showResumeOpenChat &&
       onResumeOpenChat &&
@@ -244,196 +197,108 @@ export function ChatSidebarSection({
             className="w-full flex gap-2 items-center justify-between cursor-pointer rounded-lg border border-gray-400 bg-white px-3 py-2 text-left text-sm font-medium text-brand-800 transition-colors hover:bg-brand-50"
           >
             <span>
-            Continue chat with{" "}
-            <span className="font-semibold">{resumeChatCustomerName}</span>
+              Continue chat with{" "}
+              <span className="font-semibold">{resumeChatCustomerName}</span>
             </span>
-            <span><FiArrowRight className="w-4 h-4" /></span>
+            <span>
+              <FiArrowRight className="w-4 h-4" />
+            </span>
           </button>
         </div>
       ) : null}
 
       <div className="flex min-h-0 min-w-0 flex-1 flex-col xl:flex-row">
-      {/* Queue Column */}
-      {showQueue ? (
-        <div
-          className={cn(
-            "flex min-h-0 flex-col border-gray-200 xl:w-1/2 xl:border-r max-w-[400px]",
-            listTab === "queue" ? "flex flex-1 xl:flex-none" : "hidden xl:flex",
-          )}
-        >
-        <div className="shrink-0 border-b border-gray-100 p-3 sm:p-4">
-          <div className="mb-3 hidden items-center justify-between xl:flex">
-            <h3 className="text-sm font-semibold text-gray-700">Queue</h3>
-            <span className="rounded-full bg-gray-200 px-2 py-0.5 text-xs font-medium text-gray-700">
-              {queue.length}
-            </span>
-          </div>
-          <div className="relative">
-            <FiSearch className="absolute left-3 top-1/2 -translate-y-1/2 text-gray-400 w-3.5 h-3.5" />
-            <input
-              type="text"
-              placeholder="Search by name, email, phone…"
-              value={queueSearch}
-              onChange={(e) => setQueueSearch(e.target.value)}
-              className="w-full pl-8 pr-3 py-2 bg-gray-50 border border-gray-200 rounded-md text-sm focus:outline-none focus:ring-1 focus:ring-brand-500 focus:border-brand-500"
-            />
-          </div>
-        </div>
-
-        <div className="flex-1 overflow-y-auto p-2">
-          {sortedQueue.map((chat) => {
-            const timeLabel =
+        {/* Queue Column */}
+        {showQueue ? (
+          <ChatListColumn
+            title="Queue"
+            titleCount={queue.length}
+            titleCountClassName="rounded-full bg-gray-200 px-2 py-0.5 text-xs font-medium text-gray-700"
+            isVisible={listTab === "queue"}
+            className="flex min-h-0 flex-col border-gray-200 xl:w-1/2 xl:border-r max-w-[400px]"
+            searchValue={queueSearch}
+            onSearchChange={setQueueSearch}
+            chats={sortedQueue}
+            emptyText="No customers waiting in the queue."
+            searchEmptyText="No matching chats found."
+            onRowClick={onClaimChat}
+            rowClassName={(chat) =>
+              `w-full text-left flex gap-3 p-3 rounded-lg hover:bg-gray-50 cursor-pointer border border-transparent mb-1 transition-colors ${chat.lastAssignedAgent && chat.lastChatTime ? "items-center" : "items-start"}`
+            }
+            timeLabel={(chat) =>
               chat.messageTimeDisplay ??
               (chat.lastMessage
                 ? formatTime(chat.lastMessage.createdAt)
-                : formatTime(chat.createdAt));
-
-            return (
-              <button
-                key={chat.id}
-                type="button"
-                onClick={() => onClaimChat(chat.id)}
-                className={`w-full text-left flex gap-3 p-3 rounded-lg hover:bg-gray-50 cursor-pointer border border-transparent mb-1 transition-colors ${chat.lastAssignedAgent && chat.lastChatTime ? "items-center" : "items-start"}`}
-              >
-                <div className="relative shrink-0">
-                  <AvatarWithInitials
-                    name={chat.customer.name}
-                    src={chat.customer.avatar}
-                    size={40}
-                  />
-                  {/* <ChatActiveDot isChatActive={chat.isChatActive} /> */}
-                </div>
-                <div className="flex-1 min-w-0">
-                  <div className="flex justify-between items-baseline mb-0.5">
-                    <h4 className="text-sm font-medium text-gray-900 truncate">
-                      {chat.customer.name}
-                    </h4>
-                    <span className="text-xs text-gray-400 shrink-0 ml-2">
-                      {timeLabel}
+                : formatTime(chat.createdAt))
+            }
+            renderRowMeta={(chat) =>
+              chat.lastAssignedAgent && chat.lastChatTime ? (
+                <div>
+                  <p className="text-[10px] text-gray-600 truncate">
+                    Last assigned to:{" "}
+                    <span className="font-medium text-gray-700">
+                      {" "}
+                      {chat.lastAssignedAgent ?? ""}
                     </span>
-                  </div>
-                  {chat.lastAssignedAgent && chat.lastChatTime && <div>
-                    <p className="text-[10px] text-gray-600 truncate">
-                      Last assigned to: <span className="font-medium text-gray-700"> {chat.lastAssignedAgent ?? ""}</span>
-                    </p>
-                    <p className="text-[10px] text-gray-600 truncate">
-                      Last chat time: <span className="font-medium text-gray-700"> {chat.lastChatTime}</span>
-                    </p>
-                  </div>
-                  } </div>
+                  </p>
+                  <p className="text-[10px] text-gray-600 truncate">
+                    Last chat time:{" "}
+                    <span className="font-medium text-gray-700">
+                      {" "}
+                      {chat.lastChatTime}
+                    </span>
+                  </p>
+                </div>
+              ) : null
+            }
+          />
+        ) : null}
 
-              </button>
-            );
-          })}
-
-          {sortedQueue.length === 0 && (
-            <div className="mt-8 text-center text-xs text-gray-400 px-2">
-              {queueSearch
-                ? "No matching chats found."
-                : "No customers waiting in the queue."}
-            </div>
+        {/* My Chats Column */}
+        <ChatListColumn
+          title="My Chats"
+          titleCount={myChats.length}
+          titleCountClassName="rounded-full bg-brand-100 px-2 py-0.5 text-xs font-medium text-brand-600"
+          isVisible={listTab === "my"}
+          className={cn(
+            "flex min-h-0 flex-col border-gray-200 max-w-[400px]",
+            showQueue ? "xl:w-1/2" : "xl:w-full",
           )}
-        </div>
-        </div>
-      ) : null}
-
-      {/* My Chats Column */}
-      <div
-        className={cn(
-          "flex min-h-0 flex-col border-gray-200 max-w-[400px]",
-          showQueue ? "xl:w-1/2" : "xl:w-full",
-          listTab === "my" ? "flex flex-1 xl:flex-none" : "hidden xl:flex",
-        )}
-      >
-        <div className="shrink-0 border-b border-gray-100 p-3 sm:p-4">
-          <div className="mb-3 hidden items-center justify-between xl:flex">
-            <h3 className="text-sm font-semibold text-gray-700">My Chats</h3>
-            <span className="rounded-full bg-brand-100 px-2 py-0.5 text-xs font-medium text-brand-600">
-              {myChats.length}
-            </span>
-          </div>
-          <div className="relative">
-            <FiSearch className="absolute left-3 top-1/2 -translate-y-1/2 text-gray-400 w-3.5 h-3.5" />
-            <input
-              type="text"
-              placeholder="Search by name, email, phone…"
-              value={myChatsSearch}
-              onChange={(e) => setMyChatsSearch(e.target.value)}
-              className="w-full pl-8 pr-3 py-2 bg-gray-50 border border-gray-200 rounded-md text-sm focus:outline-none focus:ring-1 focus:ring-brand-500 focus:border-brand-500"
-            />
-          </div>
-        </div>
-
-        <div className="flex-1 overflow-y-auto p-2">
-          {sortedMyChats.map((chat) => {
-            const isActive = chat.id === activeChatId;
-            const timeLabel =
-              chat.messageTimeDisplay ??
-              (chat.lastMessage
-                ? formatTime(chat.lastMessage.createdAt)
-                : "");
+          searchValue={myChatsSearch}
+          onSearchChange={setMyChatsSearch}
+          chats={sortedMyChats}
+          emptyText="No active chats assigned to you yet."
+          searchEmptyText="No matching chats found."
+          onRowClick={onSelectChat}
+          rowClassName={(chat) =>
+            "w-full text-left flex items-start gap-3 p-3 rounded-lg cursor-pointer mb-1 transition-colors border " +
+            (chat.id === activeChatId
+              ? "bg-brand-50 border-brand-100"
+              : "hover:bg-gray-50 border-transparent")
+          }
+          timeLabel={(chat) =>
+            chat.messageTimeDisplay ??
+            (chat.lastMessage ? formatTime(chat.lastMessage.createdAt) : "")
+          }
+          renderRowMeta={(chat) => {
             const unread = chat.counts ?? 0;
-
-            return (
-              <button
-                key={chat.id}
-                type="button"
-                onClick={() => onSelectChat(chat.id)}
-                className={
-                  "w-full text-left flex items-start gap-3 p-3 rounded-lg cursor-pointer mb-1 transition-colors border " +
-                  (isActive
-                    ? "bg-brand-50 border-brand-100"
-                    : "hover:bg-gray-50 border-transparent")
-                }
-              >
-                <div className="relative shrink-0">
-                  <AvatarWithInitials
-                    name={chat.customer.name}
-                    src={chat.customer.avatar}
-                    size={40}
-                  />
-                  {/* <ChatActiveDot isChatActive={chat.isChatActive} /> */}
-                </div>
-                <div className="flex-1 min-w-0">
-                  <div className="flex justify-between items-baseline mb-0.5">
-                    <h4 className="text-sm font-medium text-gray-900 truncate">
-                      {chat.customer.name}
-                    </h4>
-                    {timeLabel && (
-                      <span className="text-xs text-gray-400 shrink-0 ml-2">
-                        {timeLabel}
-                      </span>
-                    )}
-                  </div>
-                  {(chat.customer.phone?.trim() || unread > 0) ? (
-                    <div className="flex items-center justify-between gap-2">
-                      <p className="min-w-0 flex-1 truncate text-[10px] text-gray-500">
-                        {chat.customer.phone?.trim() ?? ""}
-                      </p>
-                      {unread > 0 ? (
-                        <span
-                          className="flex min-h-4.5 min-w-4.5 shrink-0 items-center justify-center rounded-full bg-red-500 px-1.5 text-[9px] font-semibold leading-none text-white"
-                          aria-label={`${unread} unread messages`}
-                        >
-                          {unreadBadgeLabel(unread)}
-                        </span>
-                      ) : null}
-                    </div>
-                  ) : null}
-                </div>
-              </button>
-            );
-          })}
-
-          {sortedMyChats.length === 0 && (
-            <div className="mt-8 text-center text-xs text-gray-400 px-2">
-              {myChatsSearch
-                ? "No matching chats found."
-                : "No active chats assigned to you yet."}
-            </div>
-          )}
-        </div>
-      </div>
+            return chat.customer.phone?.trim() || unread > 0 ? (
+              <div className="flex items-center justify-between gap-2">
+                <p className="min-w-0 flex-1 truncate text-[10px] text-gray-500">
+                  {chat.customer.phone?.trim() ?? ""}
+                </p>
+                {unread > 0 ? (
+                  <span
+                    className="flex min-h-4.5 min-w-4.5 shrink-0 items-center justify-center rounded-full bg-red-500 px-1.5 text-[9px] font-semibold leading-none text-white"
+                    aria-label={`${unread} unread messages`}
+                  >
+                    {unreadBadgeLabel(unread)}
+                  </span>
+                ) : null}
+              </div>
+            ) : null;
+          }}
+        />
       </div>
     </aside>
   );

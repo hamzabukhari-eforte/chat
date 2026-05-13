@@ -1,6 +1,5 @@
 "use client";
 
-import Image from "next/image";
 import {
   FormEvent,
   useCallback,
@@ -9,39 +8,11 @@ import {
   useRef,
   useState,
 } from "react";
-import {
-  FiChevronDown,
-  FiInfo,
-  FiSend,
-  FiSmile,
-  FiPaperclip,
-  FiX,
-  FiFile,
-  FiMic,
-  FiSearch,
-  FiMoreVertical,
-} from "react-icons/fi";
-import {
-  FaFilePdf,
-  FaFileWord,
-  FaFileExcel,
-  FaFileCsv,
-  FaFileAlt,
-} from "react-icons/fa";
 import { TicketDrawerSection } from "./TicketDrawerSection";
-import { ExpandableMessageText } from "../atoms/ExpandableMessageText";
-import { AvatarWithInitials } from "../atoms/AvatarWithInitials";
-import { MessageSeenTicks } from "../atoms/MessageSeenTicks";
-import { ChatAudioRecorder } from "../atoms/ChatAudioRecorder";
-import { ChatVideoPlayer } from "../atoms/ChatVideoPlayer";
 import {
-  isVideoFile,
   voiceClipFileNameForBlob,
 } from "../../lib/chat/fileAttachment";
 import { HiOutlineChatBubbleLeftRight } from "react-icons/hi2";
-import data from "@emoji-mart/data";
-import Picker from "@emoji-mart/react";
-import { attachmentShouldRenderAsVideo } from "../../lib/chat/attachmentDisplay";
 import { stableMessageListKey } from "../../lib/chat/messageKey";
 import {
   formatChatDateSeparatorLabel,
@@ -57,6 +28,17 @@ import type {
   Message,
   TransferAgentOption,
 } from "../../lib/chat/types";
+import type { ComposerFilePreview } from "../../lib/chat/composerAttachments";
+import {
+  blobToDataUrl,
+  createFilePreview,
+  previewsToAttachments,
+  revokeBlobPreviewUrl,
+} from "../../lib/chat/composerAttachments";
+import { ChatMessageRow } from "./chat-window/ChatMessageRow";
+import { ChatComposer } from "./chat-window/ChatComposer";
+import { ChatWindowHeader } from "./chat-window/ChatWindowHeader";
+import { ChatWindowModals } from "./chat-window/ChatWindowModals";
 
 interface Props {
   activeChat: Chat | null;
@@ -84,21 +66,14 @@ interface Props {
   ticketSmsTemplates?: { id: string; name: string }[];
   /** Logged-in agent id for ticket / SES register-complaint calls. */
   agentUserId: string;
+  /** SES context required by ticket review submit API. */
+  ticketDomainIndex?: number | null;
+  /** SES context required by ticket review submit API. */
+  ticketModuleIndex?: number | null;
   /** Tickets for the open chat (refreshed when the ticket drawer opens). */
   ticketList?: CustomerChatTicket[];
   ticketsLoading?: boolean;
   onTicketDrawerOpen?: () => void;
-}
-
-const ACCEPTED_IMAGE_TYPES = "image/jpeg,image/png,image/gif,image/webp";
-const ACCEPTED_VIDEO_TYPES = "video/mp4,video/quicktime,video/webm";
-const ACCEPTED_DOC_TYPES = ".pdf,.doc,.docx,.txt,.xls,.xlsx,.csv";
-
-interface FilePreview {
-  id: string;
-  file: File;
-  type: "image" | "video" | "document" | "audio";
-  previewUrl?: string;
 }
 
 /** Prefer `messageHeader` + local time from `createdAt`; fallback to `createdAt` for the pill. */
@@ -108,58 +83,6 @@ function dateSeparatorLabelFromMessage(message: Message): string {
   if (h && timeLabel) return `${h}, ${timeLabel}`;
   if (h) return h;
   return formatChatDateSeparatorLabel(message.createdAt);
-}
-
-function getOnlineStatusText(status?: string): string {
-  if (status === "online") return "Online";
-  if (status === "away") return "Away";
-  return "Offline";
-}
-
-function formatFileSize(bytes: number): string {
-  if (bytes < 1024) return bytes + " B";
-  if (bytes < 1024 * 1024) return (bytes / 1024).toFixed(1) + " KB";
-  return (bytes / (1024 * 1024)).toFixed(1) + " MB";
-}
-
-function revokeBlobPreviewUrl(url: string | undefined) {
-  if (url?.startsWith("blob:")) URL.revokeObjectURL(url);
-}
-
-function getFileBaseName(fullName: string): string {
-  const n = (fullName || "").trim();
-  if (!n) return "";
-  // Handles cases like `/recattachments/.../file.pdf`
-  const parts = n.split(/[\\/]/);
-  return parts[parts.length - 1] || n;
-}
-
-function getFileExtension(fullName: string): string {
-  const base = getFileBaseName(fullName).toLowerCase();
-  const m = /\.([a-z0-9]+)$/i.exec(base);
-  return m?.[1] ?? "";
-}
-
-function getFileIcon(ext: string, className: string) {
-  switch (ext) {
-    case "pdf":
-      return <FaFilePdf className={className} />;
-    case "doc":
-    case "docx":
-    case "rtf":
-      return <FaFileWord className={className} />;
-    case "xls":
-    case "xlsx":
-    case "xlsm":
-      return <FaFileExcel className={className} />;
-    case "csv":
-      return <FaFileCsv className={className} />;
-    case "txt":
-      // no dedicated txt icon; fallback to generic document
-      return <FaFileAlt className={className} />;
-    default:
-      return <FaFileAlt className={className} />;
-  }
 }
 
 export function ChatWindowSection({
@@ -177,6 +100,8 @@ export function ChatWindowSection({
   ticketEmailTemplates = [],
   ticketSmsTemplates = [],
   agentUserId,
+  ticketDomainIndex,
+  ticketModuleIndex,
   ticketList,
   ticketsLoading = false,
   onTicketDrawerOpen,
@@ -194,7 +119,7 @@ export function ChatWindowSection({
   const [headerOverflowOpen, setHeaderOverflowOpen] = useState(false);
   const [closeChatConfirmOpen, setCloseChatConfirmOpen] = useState(false);
   const [showEmojiPicker, setShowEmojiPicker] = useState(false);
-  const [filePreviews, setFilePreviews] = useState<FilePreview[]>([]);
+  const [filePreviews, setFilePreviews] = useState<ComposerFilePreview[]>([]);
   const [imagePreview, setImagePreview] = useState<{
     url: string;
     name: string;
@@ -349,44 +274,14 @@ export function ChatWindowSection({
     setShowEmojiPicker(false);
   };
 
-  const fileToBase64 = (file: File): Promise<string> => {
-    return new Promise((resolve, reject) => {
-      const reader = new FileReader();
-      reader.readAsDataURL(file);
-      reader.onload = () => resolve(reader.result as string);
-      reader.onerror = (error) => reject(error);
-    });
-  };
-
   const handleFileSelect = async (event: React.ChangeEvent<HTMLInputElement>) => {
     const files = event.target.files;
     if (!files) return;
 
-    const newPreviews: FilePreview[] = [];
+    const newPreviews: ComposerFilePreview[] = [];
 
     for (const file of Array.from(files)) {
-      const isImage = file.type.startsWith("image/");
-      const isVideo = isVideoFile(file);
-      const isAudio = file.type.startsWith("audio/");
-      const preview: FilePreview = {
-        id: Math.random().toString(36).substring(7),
-        file,
-        type: isImage
-          ? "image"
-          : isVideo
-            ? "video"
-            : isAudio
-              ? "audio"
-              : "document",
-      };
-
-      if (isImage || isVideo) {
-        preview.previewUrl = await fileToBase64(file);
-      } else {
-        preview.previewUrl = URL.createObjectURL(file);
-      }
-
-      newPreviews.push(preview);
+      newPreviews.push(await createFilePreview(file));
     }
 
     setFilePreviews((prev) => [...prev, ...newPreviews]);
@@ -403,14 +298,6 @@ export function ChatWindowSection({
       return prev.filter((p) => p.id !== id);
     });
   };
-
-  const blobToDataUrl = (blob: Blob): Promise<string> =>
-    new Promise((resolve, reject) => {
-      const reader = new FileReader();
-      reader.onloadend = () => resolve(reader.result as string);
-      reader.onerror = () => reject(reader.error);
-      reader.readAsDataURL(blob);
-    });
 
   const handleVoiceRecordingComplete = async (blob: Blob) => {
     const url = await blobToDataUrl(blob);
@@ -455,14 +342,7 @@ export function ChatWindowSection({
     const text = draft.trim();
     if (!text && filePreviews.length === 0) return;
 
-    const attachments: Attachment[] = filePreviews.map((fp) => ({
-      id: fp.id,
-      type: fp.type,
-      name: fp.file.name,
-      url: fp.previewUrl || "",
-      size: fp.file.size,
-      mimeType: fp.file.type,
-    }));
+    const attachments: Attachment[] = previewsToAttachments(filePreviews);
 
     const files = filePreviews.map((fp) => fp.file);
     onSendMessage(
@@ -516,171 +396,33 @@ export function ChatWindowSection({
 
   return (
     <section className="flex min-h-0 min-w-0 flex-1 flex-col bg-white">
-      {/* Header */}
-      <div className="flex shrink-0 items-center justify-between gap-2 border-b border-gray-200 p-3 sm:p-4">
-        <div className="flex min-w-0 flex-1 items-center gap-2 sm:gap-3">
-          <AvatarWithInitials
-            name={customerName}
-            src={activeChat.customer.avatar}
-            size={40}
-            alt={customerName}
-          />
-          <div className="min-w-0">
-            <h3 className="truncate text-sm font-semibold text-gray-900">
-              {customerName}
-            </h3>
-            {/* <p className="text-xs text-gray-500">
-              {getOnlineStatusText(activeChat.customer.onlineStatus)}
-            </p> */}
-          </div>
-          <button
-            type="button"
-            onClick={onToggleCustomerInfo}
-            aria-label="Toggle customer info"
-            className={
-              "w-5 h-5 flex items-center justify-center transition-colors cursor-pointer " +
-              (showCustomerInfo
-                ? "text-brand-600"
-                : "text-gray-500 hover:text-brand-600")
-            }
-          >
-            <FiInfo className="w-4 h-4" />
-          </button>
-        </div>
-
-        <div className="hidden shrink-0 items-center gap-2 xl:flex">
-          <div className="relative" ref={transferMenuRef}>
-            <button
-              type="button"
-              onClick={() => setTransferMenuOpen((o) => !o)}
-              aria-expanded={transferMenuOpen}
-              aria-haspopup="menu"
-              aria-label="Transfer chat"
-              className={
-                "flex h-8 cursor-pointer items-center gap-1.5 rounded-lg border border-gray-200 px-2 text-xs font-medium text-gray-700 " +
-                "transition-colors hover:border-brand-300 hover:bg-brand-50 hover:text-brand-600"
-              }
-            >
-              Transfer
-              <FiChevronDown
-                className={
-                  "h-3 w-3 shrink-0 transition-transform " +
-                  (transferMenuOpen ? "rotate-180" : "")
-                }
-              />
-            </button>
-            {transferMenuOpen ? (
-              <div
-                className="absolute right-0 top-full z-50 mt-1 min-w-[14rem] rounded-lg border border-gray-200 bg-white py-1 shadow-lg"
-                role="menu"
-              >
-                <button
-                  type="button"
-                  role="menuitem"
-                  className="flex w-full cursor-pointer px-3 py-2.5 text-left text-sm text-gray-800 hover:bg-gray-50"
-                  onClick={() => {
-                    setTransferMenuOpen(false);
-                    setTransferQueueConfirmOpen(true);
-                  }}
-                >
-                  Transfer to queue
-                </button>
-                <button
-                  type="button"
-                  role="menuitem"
-                  className="flex w-full cursor-pointer px-3 py-2.5 text-left text-sm text-gray-800 hover:bg-gray-50"
-                  onClick={openTransferAgentModal}
-                >
-                  Transfer to agent
-                </button>
-              </div>
-            ) : null}
-          </div>
-          <button
-            type="button"
-            onClick={() => setTicketDrawerOpen(true)}
-            aria-label="Open ticket"
-            aria-expanded={ticketDrawerOpen}
-            className={
-              "flex h-8 cursor-pointer items-center gap-1.5 rounded-lg border border-gray-200 px-4 text-xs font-medium text-gray-700 " +
-              "transition-colors hover:border-brand-300 hover:bg-brand-50 hover:text-brand-600"
-            }
-          >
-            Ticket
-          </button>
-
-          <button
-            type="button"
-            onClick={() => setCloseChatConfirmOpen(true)}
-            className="cursor-pointer rounded-lg bg-red-50 px-2 py-2 text-xs font-medium text-red-600 transition-colors hover:bg-red-100"
-          >
-            Close Chat
-          </button>
-        </div>
-
-        <div className="relative shrink-0 xl:hidden" ref={headerOverflowRef}>
-          <button
-            type="button"
-            onClick={() => setHeaderOverflowOpen((o) => !o)}
-            aria-expanded={headerOverflowOpen}
-            aria-haspopup="menu"
-            aria-label="Chat actions"
-            className="flex h-9 w-9 cursor-pointer items-center justify-center rounded-lg border border-gray-200 text-gray-700 transition-colors hover:border-brand-300 hover:bg-brand-50 hover:text-brand-600"
-          >
-            <FiMoreVertical className="h-5 w-5" />
-          </button>
-          {headerOverflowOpen ? (
-            <div
-              className="absolute right-0 top-full z-50 mt-1 min-w-[12.5rem] rounded-lg border border-gray-200 bg-white py-1 shadow-lg"
-              role="menu"
-            >
-              <button
-                type="button"
-                role="menuitem"
-                className="flex w-full cursor-pointer px-3 py-2.5 text-left text-sm text-gray-800 hover:bg-gray-50"
-                onClick={() => {
-                  setHeaderOverflowOpen(false);
-                  setTransferQueueConfirmOpen(true);
-                }}
-              >
-                Transfer to queue
-              </button>
-              <button
-                type="button"
-                role="menuitem"
-                className="flex w-full cursor-pointer px-3 py-2.5 text-left text-sm text-gray-800 hover:bg-gray-50"
-                onClick={openTransferAgentModal}
-              >
-                Transfer to agent
-              </button>
-              <div className="my-1 h-px bg-gray-100" role="separator" />
-              <button
-                type="button"
-                role="menuitem"
-                className="flex w-full cursor-pointer px-3 py-2.5 text-left text-sm text-gray-800 hover:bg-gray-50"
-                onClick={() => {
-                  setHeaderOverflowOpen(false);
-                  setTicketDrawerOpen(true);
-                }}
-              >
-                Ticket
-              </button>
-              <div className="my-1 h-px bg-gray-100" role="separator" />
-              <button
-                type="button"
-                role="menuitem"
-                className="flex w-full cursor-pointer px-3 py-2.5 text-left text-sm font-medium text-red-600 hover:bg-red-50"
-                onClick={() => {
-                  setHeaderOverflowOpen(false);
-                  setCloseChatConfirmOpen(true);
-                }}
-              >
-                Close Chat
-              </button>
-            </div>
-          ) : null}
-        </div>
-      </div>
+      <ChatWindowHeader
+        customerName={customerName}
+        customerAvatar={activeChat.customer.avatar}
+        showCustomerInfo={showCustomerInfo}
+        transferMenuOpen={transferMenuOpen}
+        headerOverflowOpen={headerOverflowOpen}
+        ticketDrawerOpen={ticketDrawerOpen}
+        transferMenuRef={transferMenuRef}
+        headerOverflowRef={headerOverflowRef}
+        onToggleCustomerInfo={onToggleCustomerInfo}
+        onToggleTransferMenu={() => setTransferMenuOpen((o) => !o)}
+        onOpenTransferQueueConfirm={() => {
+          setTransferMenuOpen(false);
+          setHeaderOverflowOpen(false);
+          setTransferQueueConfirmOpen(true);
+        }}
+        onOpenTransferAgentModal={openTransferAgentModal}
+        onOpenTicketDrawer={() => {
+          setHeaderOverflowOpen(false);
+          setTicketDrawerOpen(true);
+        }}
+        onOpenCloseChatConfirm={() => {
+          setHeaderOverflowOpen(false);
+          setCloseChatConfirmOpen(true);
+        }}
+        onToggleHeaderOverflow={() => setHeaderOverflowOpen((o) => !o)}
+      />
 
       <TicketDrawerSection
         key={
@@ -691,6 +433,8 @@ export function ChatWindowSection({
         open={ticketDrawerOpen}
         onOpenChange={setTicketDrawerOpen}
         agentUserId={agentUserId}
+        domainIndex={ticketDomainIndex}
+        moduleIndex={ticketModuleIndex}
         customerPhone={activeChat.customer.phone ?? ""}
         domainOptions={ticketDomains}
         emailTemplateOptions={ticketEmailTemplates}
@@ -722,8 +466,6 @@ export function ChatWindowSection({
           const shouldShowDate =
             !prevMessage || groupKey !== prevGroupKey;
 
-          const timeStr = formatMessageTimeLabelFromMessage(message);
-
           const datePillLabel = dateSeparatorLabelFromMessage(message);
           return (
             <div key={stableMessageListKey(message)}>
@@ -735,609 +477,62 @@ export function ChatWindowSection({
                 </div>
               )}
 
-              {isAgent ? (
-                <div className="flex gap-3 justify-end min-w-0">
-                  <div className="flex min-w-0 flex-1 flex-col items-end">
-                    {message.attachments && message.attachments.length > 0 && (
-                      <div className="flex flex-wrap gap-2 mb-2 justify-end">
-                        {message.attachments.map((att) => (
-                          <div key={att.id} className="relative shrink-0">
-                            {attachmentShouldRenderAsVideo(att) && att.url ? (
-                              <div className="flex flex-col items-end gap-1">
-                                <ChatVideoPlayer url={att.url} maxWidth={280} />
-                                <a
-                                  href={att.url}
-                                  download={getFileBaseName(att.name) || "video"}
-                                  target="_blank"
-                                  rel="noopener noreferrer"
-                                  className="text-xs font-medium text-brand-600 hover:underline cursor-pointer max-w-[80vw] md:max-w-full"
-                                >
-                                  Download
-                                </a>
-                              </div>
-                            ) : att.type === "image" && att.url ? (
-                              <button
-                                type="button"
-                                onClick={() =>
-                                  setImagePreview({
-                                    url: att.url,
-                                    name: att.name,
-                                  })
-                                }
-                                aria-label={`Preview image: ${att.name}`}
-                                className="cursor-pointer"
-                              >
-                                <div className="relative w-[200px] h-[150px]">
-                                  <Image
-                                    src={att.url}
-                                    alt={att.name}
-                                    fill
-                                    unoptimized
-                                    className="rounded-lg object-cover hover:opacity-90 transition-opacity"
-                                  />
-                                </div>
-                              </button>
-                            ) : att.type === "audio" && att.url ? (
-                              <div className="rounded-lg [color-scheme:light]">
-                                <audio
-                                  src={att.url}
-                                  controls
-                                  className="max-w-[220px] rounded-md"
-                                  preload="metadata"
-                                />
-                              </div>
-                            ) : (
-                              <button
-                                type="button"
-                                onClick={() => downloadAttachment(att)}
-                                disabled={!att.url}
-                                className="flex items-center gap-2 bg-gray-200 text-gray-700 px-3 py-2 rounded-lg hover:bg-gray-300 transition-colors cursor-pointer disabled:opacity-60 disabled:cursor-not-allowed"
-                              >
-                                <div className="w-8 h-8 rounded-md bg-gray-300 flex items-center justify-center shrink-0">
-                                  {getFileIcon(
-                                    getFileExtension(att.name),
-                                    "w-5 h-5 text-gray-700",
-                                  )}
-                                </div>
-                                <div className="flex flex-col min-w-0">
-                                  <span
-                                    className="text-sm font-medium truncate max-w-[180px]"
-                                    title={att.name}
-                                  >
-                                    {getFileBaseName(att.name)}
-                                  </span>
-                                  {getFileExtension(att.name) && (
-                                    <span className="text-[10px] text-gray-500 uppercase leading-3">
-                                      {getFileExtension(att.name)}
-                                    </span>
-                                  )}
-                                </div>
-                              </button>
-                            )}
-                          </div>
-                        ))}
-                      </div>
-                    )}
-                    {(message.text?.length ?? 0) > 0 && (
-                      <div className="bg-brand-500 text-white rounded-2xl rounded-tr-sm px-4 py-2.5 inline-block max-w-[min(70vw,100%)]">
-                        <ExpandableMessageText
-                          text={message.text!}
-                          tone="inverse"
-                        />
-                      </div>
-                    )}
-                    <div className="flex items-center justify-end gap-1 mt-1">
-                      <span className="text-xs text-gray-400">{timeStr}</span>
-                      <MessageSeenTicks status={message.chatSeenStatus} />
-                    </div>
-                  </div>
-                  <AvatarWithInitials
-                    name={agentName}
-                    src={activeChat.agent?.avatar}
-                    size={32}
-                    alt={agentName}
-                  />
-                </div>
-              ) : (
-                <div className="flex min-w-0 gap-3">
-                  <AvatarWithInitials
-                    name={customerName}
-                    src={activeChat.customer.avatar}
-                    size={32}
-                    alt={customerName}
-                  />
-                  <div className="min-w-0 flex-1">
-                    {message.attachments && message.attachments.length > 0 && (
-                      <div className="flex flex-wrap gap-2 mb-2">
-                        {message.attachments.map((att) => (
-                          <div key={att.id} className="relative shrink-0">
-                            {attachmentShouldRenderAsVideo(att) && att.url ? (
-                              <div className="flex flex-col items-start gap-1">
-                                <ChatVideoPlayer url={att.url} maxWidth={280} />
-                                <a
-                                  href={att.url}
-                                  download={getFileBaseName(att.name) || "video"}
-                                  target="_blank"
-                                  rel="noopener noreferrer"
-                                  className="text-xs font-medium text-brand-600 hover:underline cursor-pointer max-w-[80vw] md:max-w-full"
-                                >
-                                  Download
-                                </a>
-                              </div>
-                            ) : att.type === "image" && att.url ? (
-                              <button
-                                type="button"
-                                onClick={() =>
-                                  setImagePreview({
-                                    url: att.url,
-                                    name: att.name,
-                                  })
-                                }
-                                aria-label={`Preview image: ${att.name}`}
-                                className="cursor-pointer"
-                              >
-                                <div className="relative w-[200px] h-[150px]">
-                                  <Image
-                                    src={att.url}
-                                    alt={att.name}
-                                    fill
-                                    unoptimized
-                                    className="rounded-lg object-cover hover:opacity-90 transition-opacity"
-                                  />
-                                </div>
-                              </button>
-                            ) : att.type === "audio" && att.url ? (
-                              <div className="rounded-lg [color-scheme:light]">
-                                <audio
-                                  src={att.url}
-                                  controls
-                                  className="max-w-[220px] rounded-md"
-                                  preload="metadata"
-                                />
-                              </div>
-                            ) : (
-                              <button
-                                type="button"
-                                onClick={() => downloadAttachment(att)}
-                                disabled={!att.url}
-                                className="flex items-center gap-2 bg-gray-200 text-gray-700 px-3 py-2 rounded-lg hover:bg-gray-300 transition-colors cursor-pointer disabled:opacity-60 disabled:cursor-not-allowed"
-                              >
-                                <div className="w-8 h-8 rounded-md bg-gray-300 flex items-center justify-center shrink-0">
-                                  {getFileIcon(
-                                    getFileExtension(att.name),
-                                    "w-5 h-5 text-gray-700",
-                                  )}
-                                </div>
-                                <div className="flex flex-col min-w-0">
-                                  <span
-                                    className="text-sm font-medium truncate max-w-[180px]"
-                                    title={att.name}
-                                  >
-                                    {getFileBaseName(att.name)}
-                                  </span>
-                                  {getFileExtension(att.name) && (
-                                    <span className="text-[10px] text-gray-500 uppercase leading-3">
-                                      {getFileExtension(att.name)}
-                                    </span>
-                                  )}
-                                </div>
-                              </button>
-                            )}
-                          </div>
-                        ))}
-                      </div>
-                    )}
-                    {(message.text?.length ?? 0) > 0 && (
-                      <div className="bg-gray-100 rounded-2xl rounded-tl-sm px-4 py-2.5 inline-block max-w-[min(70vw,100%)] text-gray-800">
-                        <ExpandableMessageText text={message.text!} />
-                      </div>
-                    )}
-                    <span className="text-xs text-gray-400 mt-1 block">
-                      {timeStr}
-                    </span>
-                  </div>
-                </div>
-              )}
+              <ChatMessageRow
+                message={message}
+                isAgent={isAgent}
+                agentName={agentName}
+                agentAvatar={activeChat.agent?.avatar}
+                customerName={customerName}
+                customerAvatar={activeChat.customer.avatar}
+                onPreviewImage={(url, name) => setImagePreview({ url, name })}
+                onDownloadAttachment={downloadAttachment}
+              />
             </div>
           );
         })}
       </div>
 
-      {/* Image preview overlay */}
-      {imagePreview && (
-        <div
-          className="fixed inset-0 z-50 flex items-center justify-center bg-black/55 p-4 backdrop-blur-sm"
-          role="dialog"
-          aria-modal="true"
-          onMouseDown={(e) => {
-            if (e.currentTarget === e.target) setImagePreview(null);
-          }}
-        >
-          <div className="relative w-[40vw] h-[60vh] max-h-[700px] rounded-lg overflow-hidden bg-black">
-            <button
-              type="button"
-              onClick={() => setImagePreview(null)}
-              className="absolute top-3 right-3 z-50 w-10 h-10 rounded-full bg-white/90 hover:bg-white flex items-center justify-center cursor-pointer transition-colors shadow-sm focus:outline-none focus:ring-2 focus:ring-brand-500"
-              aria-label="Close image preview"
-            >
-              <FiX className="w-4 h-4 text-gray-700" />
-            </button>
+      <ChatWindowModals
+        imagePreview={imagePreview}
+        transferQueueConfirmOpen={transferQueueConfirmOpen}
+        closeChatConfirmOpen={closeChatConfirmOpen}
+        transferAgentModalOpen={transferAgentModalOpen}
+        transferAgentSearch={transferAgentSearch}
+        transferAgents={transferAgents}
+        filteredTransferAgents={filteredTransferAgents}
+        selectedTransferAgentId={selectedTransferAgentId}
+        onCloseImagePreview={() => setImagePreview(null)}
+        onCloseTransferQueueConfirm={() => setTransferQueueConfirmOpen(false)}
+        onConfirmTransferQueue={confirmTransferQueue}
+        onCloseCloseChatConfirm={() => setCloseChatConfirmOpen(false)}
+        onConfirmCloseChat={confirmCloseChat}
+        onCloseTransferAgentModal={() => {
+          setTransferAgentModalOpen(false);
+          setSelectedTransferAgentId(null);
+        }}
+        onTransferAgentSearchChange={setTransferAgentSearch}
+        onSelectTransferAgent={setSelectedTransferAgentId}
+        onConfirmTransferAgent={confirmTransferAgent}
+      />
 
-            <Image
-              src={imagePreview.url}
-              alt={imagePreview.name}
-              fill
-              unoptimized
-              sizes="90vw"
-              className="object-contain"
-            />
-
-            {imagePreview.name && (
-              <div className="mt-3 text-center">
-                <p className="text-sm text-white/90 truncate max-w-[90vw]">
-                  {imagePreview.name}
-                </p>
-              </div>
-            )}
-          </div>
-        </div>
-      )}
-
-      {/* Transfer to queue — confirmation */}
-      {transferQueueConfirmOpen ? (
-        <div
-          className="fixed inset-0 z-[60] flex items-center justify-center bg-black/50 p-4 backdrop-blur-sm"
-          role="dialog"
-          aria-modal="true"
-          aria-labelledby="transfer-queue-title"
-          onMouseDown={(e) => {
-            if (e.currentTarget === e.target) setTransferQueueConfirmOpen(false);
-          }}
-        >
-          <div className="w-full max-w-md rounded-xl bg-white p-6 shadow-xl">
-            <h2
-              id="transfer-queue-title"
-              className="text-lg font-semibold text-gray-900"
-            >
-              Transfer to queue?
-            </h2>
-            <p className="mt-2 text-sm text-gray-600">
-              Are you sure you want to move this conversation back to the queue?
-              The customer may be picked up by another agent.
-            </p>
-            <div className="mt-6 flex justify-end gap-2">
-              <button
-                type="button"
-                onClick={() => setTransferQueueConfirmOpen(false)}
-                className="px-4 py-2 rounded-lg border border-gray-200 text-sm font-medium text-gray-700 hover:bg-gray-50 transition-colors cursor-pointer"
-              >
-                Cancel
-              </button>
-              <button
-                type="button"
-                onClick={confirmTransferQueue}
-                className="px-4 py-2 rounded-lg bg-brand-600 text-white text-sm font-medium hover:bg-brand-700 transition-colors cursor-pointer"
-              >
-                Yes, transfer
-              </button>
-            </div>
-          </div>
-        </div>
-      ) : null}
-
-      {/* Close chat — confirmation */}
-      {closeChatConfirmOpen ? (
-        <div
-          className="fixed inset-0 z-[60] flex items-center justify-center bg-black/50 p-4 backdrop-blur-sm"
-          role="dialog"
-          aria-modal="true"
-          aria-labelledby="close-chat-title"
-          onMouseDown={(e) => {
-            if (e.currentTarget === e.target) setCloseChatConfirmOpen(false);
-          }}
-        >
-          <div className="w-full max-w-md rounded-xl bg-white p-6 shadow-xl">
-            <h2
-              id="close-chat-title"
-              className="text-lg font-semibold text-gray-900"
-            >
-              Close this chat?
-            </h2>
-            <p className="mt-2 text-sm text-gray-600">
-              The conversation will end for the customer. You can cancel if you
-              still need to send a message or transfer the chat instead.
-            </p>
-            <div className="mt-6 flex justify-end gap-2">
-              <button
-                type="button"
-                onClick={() => setCloseChatConfirmOpen(false)}
-                className="px-4 py-2 rounded-lg border border-gray-200 text-sm font-medium text-gray-700 hover:bg-gray-50 transition-colors cursor-pointer"
-              >
-                Cancel
-              </button>
-              <button
-                type="button"
-                onClick={confirmCloseChat}
-                className="px-4 py-2 rounded-lg bg-red-600 text-white text-sm font-medium hover:bg-red-700 transition-colors cursor-pointer"
-              >
-                Yes, close chat
-              </button>
-            </div>
-          </div>
-        </div>
-      ) : null}
-
-      {/* Transfer to agent — pick agent */}
-      {transferAgentModalOpen ? (
-        <div
-          className="fixed inset-0 z-[60] flex items-center justify-center bg-black/50 p-4 backdrop-blur-sm"
-          role="dialog"
-          aria-modal="true"
-          aria-labelledby="transfer-agent-title"
-          onMouseDown={(e) => {
-            if (e.currentTarget === e.target) setTransferAgentModalOpen(false);
-          }}
-        >
-          <div className="w-full max-w-md rounded-xl bg-white p-6 shadow-xl">
-            <h2
-              id="transfer-agent-title"
-              className="text-lg font-semibold text-gray-900"
-            >
-              Transfer to agent
-            </h2>
-            <p className="mt-1 text-sm text-gray-500">
-              Select an agent from your team
-            </p>
-            <div className="mt-4">
-              <label
-                htmlFor="transfer-agent-search"
-                className="mb-1.5 block text-xs font-medium text-gray-600"
-              >
-                Search
-              </label>
-              <div className="relative">
-                <FiSearch
-                  className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-gray-400"
-                  aria-hidden
-                />
-                <input
-                  id="transfer-agent-search"
-                  type="search"
-                  value={transferAgentSearch}
-                  onChange={(e) => setTransferAgentSearch(e.target.value)}
-                  placeholder="Name or ID…"
-                  autoComplete="off"
-                  className="w-full rounded-lg border border-gray-200 py-2 pl-9 pr-3 text-sm text-gray-900 placeholder:text-gray-400 focus:outline-none focus:ring-2 focus:ring-brand-500 focus:border-transparent cursor-text"
-                />
-              </div>
-            </div>
-            <div
-              className="mt-3 p-0.5 max-h-72 overflow-y-auto rounded-lg border border-gray-200 divide-y divide-gray-100"
-              role="listbox"
-              aria-label="Agents"
-            >
-              {transferAgents.length === 0 ? (
-                <p className="px-3 py-8 text-center text-sm text-gray-500">
-                  No agents in the list yet. Refresh after the inbox loads, or
-                  check that the API returns id → name fields on the queue
-                  response.
-                </p>
-              ) : filteredTransferAgents.length === 0 ? (
-                <p className="px-3 py-8 text-center text-sm text-gray-500">
-                  No agents match your search.
-                </p>
-              ) : (
-                filteredTransferAgents.map((agent) => {
-                  const selected = selectedTransferAgentId === agent.id;
-                  return (
-                    <button
-                      key={agent.id}
-                      type="button"
-                      role="option"
-                      aria-selected={selected}
-                      onClick={() => setSelectedTransferAgentId(agent.id)}
-                      className={
-                        "flex w-full items-center gap-3 px-3 py-3 text-left text-sm transition-colors cursor-pointer rounded-md " +
-                        (selected
-                          ? "bg-brand-50 ring-2 ring-inset ring-brand-500"
-                          : "hover:bg-gray-50")
-                      }
-                    >
-                      <span
-                        className={`w-2 h-2 rounded-full ${agent?.isLoggedIn ? "bg-green-500" : "bg-gray-200"}`}
-                      />
-
-                      <span className="font-medium text-gray-900">
-                        {agent.name}
-                      </span>
-                    </button>
-                  );
-                })
-              )}
-            </div>
-            <div className="mt-6 flex justify-end gap-2">
-              <button
-                type="button"
-                onClick={() => {
-                  setTransferAgentModalOpen(false);
-                  setSelectedTransferAgentId(null);
-                }}
-                className="px-4 py-2 rounded-lg border border-gray-200 text-sm font-medium text-gray-700 hover:bg-gray-50 transition-colors cursor-pointer"
-              >
-                Cancel
-              </button>
-              <button
-                type="button"
-                disabled={!selectedTransferAgentId}
-                onClick={confirmTransferAgent}
-                className="px-4 py-2 rounded-lg bg-brand-600 text-white text-sm font-medium hover:bg-brand-700 transition-colors cursor-pointer disabled:opacity-40 disabled:cursor-not-allowed"
-              >
-                Transfer
-              </button>
-            </div>
-          </div>
-        </div>
-      ) : null}
-
-      {/* File Previews */}
-      {filePreviews.length > 0 && (
-        <div className="px-4 py-2 border-t border-gray-100 bg-gray-50">
-          <div className="flex flex-wrap gap-2">
-            {filePreviews.map((fp) => (
-              <div
-                key={fp.id}
-                className="relative group bg-white border border-gray-200 rounded-lg p-2 flex items-center gap-2"
-              >
-                {fp.type === "audio" && fp.previewUrl ? (
-                  <div className="flex flex-col gap-1 shrink-0">
-                    <div className="w-12 h-12 rounded bg-gray-100 flex items-center justify-center">
-                      <FiMic className="w-5 h-5 text-brand-600" />
-                    </div>
-                    <div className="rounded-md [color-scheme:light]">
-                      <audio
-                        src={fp.previewUrl}
-                        controls
-                        className="h-8 w-[120px] max-w-[120px]"
-                        preload="metadata"
-                      />
-                    </div>
-                  </div>
-                ) : fp.type === "image" && fp.previewUrl ? (
-                  <Image
-                    src={fp.previewUrl}
-                    alt={fp.file.name}
-                    width={48}
-                    height={48}
-                    unoptimized
-                    className="w-12 h-12 rounded object-cover"
-                  />
-                ) : fp.type === "video" && fp.previewUrl ? (
-                  <div className="w-[100px] shrink-0">
-                    <ChatVideoPlayer url={fp.previewUrl} maxWidth={100} />
-                  </div>
-                ) : (
-                  <div className="w-12 h-12 rounded bg-gray-100 flex items-center justify-center">
-                    <FiFile className="w-5 h-5 text-gray-400" />
-                  </div>
-                )}
-
-                <div className="flex-1 min-w-0">
-                  <p className="text-xs font-medium text-gray-700 truncate max-w-[120px]">
-                    {fp.file.name}
-                  </p>
-                  <p className="text-[10px] text-gray-400">
-                    {formatFileSize(fp.file.size)}
-                  </p>
-                </div>
-                <button
-                  type="button"
-                  onClick={() => removeFilePreview(fp.id)}
-                  className="w-5 h-5 rounded-full bg-gray-200 hover:bg-red-100 flex items-center justify-center text-gray-500 hover:text-red-500 transition-colors cursor-pointer"
-                >
-                  <FiX className="w-3 h-3" />
-                </button>
-              </div>
-            ))}
-          </div>
-        </div>
-      )}
-
-      {/* Input */}
-      <div className="shrink-0 border-t border-gray-200 px-2 py-3 sm:p-4">
-        <form onSubmit={handleSubmit}>
-          <div className="flex min-w-0 items-end gap-1.5 sm:gap-2">
-            {/* Input Container — min-w-0 so the row can shrink on ~320px and keep the send button in view */}
-            <div className="flex min-h-[44px] min-w-0 flex-1 items-center rounded-xl border border-gray-200 bg-gray-50 transition-all focus-within:border-brand-500 focus-within:ring-1 focus-within:ring-brand-500">
-              {/* File Upload Button */}
-              <input
-                ref={fileInputRef}
-                type="file"
-                multiple
-                accept={`${ACCEPTED_IMAGE_TYPES},${ACCEPTED_VIDEO_TYPES},${ACCEPTED_DOC_TYPES}`}
-                onChange={handleFileSelect}
-                className="hidden"
-                id="file-upload"
-              />
-              <button
-                type="button"
-                onClick={() => fileInputRef.current?.click()}
-                className="shrink-0 cursor-pointer p-2 text-gray-400 transition-colors hover:text-gray-600 sm:p-3"
-                title="Attach file"
-              >
-                <FiPaperclip className="h-5 w-5" />
-              </button>
-
-              {/* Text Input */}
-              <textarea
-                ref={draftTextareaRef}
-                rows={1}
-                placeholder="Type your message..."
-                value={draft}
-                onChange={(e) => setDraft(e.target.value)}
-                onFocus={() => setShowEmojiPicker(false)}
-                onKeyDown={(e) => {
-                  if (e.key === "Enter" && !e.shiftKey) {
-                    e.preventDefault();
-                    handleSubmit(e);
-                  }
-                }}
-                className="max-h-[150px] min-h-[44px] min-w-0 flex-1 resize-none border-none bg-transparent py-2.5 text-sm text-gray-700 outline-none focus:ring-0 sm:py-3"
-              />
-
-              <ChatAudioRecorder
-                onRecordingComplete={handleVoiceRecordingComplete}
-                onOpenChange={handleRecorderOpenChange}
-                onError={(msg) => toast.error(msg)}
-              />
-
-              {/* Emoji Picker Button */}
-              <div className="relative shrink-0">
-                <button
-                  type="button"
-                  onClick={() => setShowEmojiPicker(!showEmojiPicker)}
-                  className={
-                    "relative z-10 cursor-pointer px-1 py-2 transition-colors sm:px-1.5 sm:py-3 " +
-                    (showEmojiPicker
-                      ? "text-brand-500"
-                      : "text-gray-400 hover:text-gray-600")
-                  }
-                  title="Add emoji"
-                >
-                  <FiSmile className="h-5 w-5" />
-                </button>
-
-                {/* Emoji Picker Popup */}
-                {showEmojiPicker && (
-                  <div
-                    ref={emojiPickerRef}
-                    className="fixed bottom-20 left-1/2 z-50 w-[calc(100vw-1rem)] max-w-[22rem] -translate-x-1/2 overflow-hidden rounded-lg border border-gray-200 bg-white shadow-lg sm:absolute sm:bottom-12 sm:left-auto sm:right-0 sm:w-[22rem] sm:translate-x-0"
-                  >
-                    <Picker
-                      data={data}
-                      onEmojiSelect={handleEmojiSelect}
-                      theme="light"
-                      previewPosition="none"
-                      skinTonePosition="none"
-                      maxFrequentRows={2}
-                      dynamicWidth={false}
-                   
-                    />
-                  </div>
-                )}
-              </div>
-            </div>
-
-            {/* Send Button */}
-            <button
-              type="submit"
-              disabled={!draft.trim() && filePreviews.length === 0}
-              className="flex h-10 w-10 shrink-0 cursor-pointer items-center justify-center rounded-xl bg-brand-600 text-white shadow-sm transition-colors hover:bg-brand-700 disabled:cursor-not-allowed disabled:opacity-40 sm:h-11 sm:w-11"
-            >
-              <FiSend className="h-4 w-4" />
-            </button>
-          </div>
-        </form>
-      </div>
+      <ChatComposer
+        draft={draft}
+        showEmojiPicker={showEmojiPicker}
+        filePreviews={filePreviews}
+        fileInputRef={fileInputRef}
+        emojiPickerRef={emojiPickerRef}
+        draftTextareaRef={draftTextareaRef}
+        onDraftChange={setDraft}
+        onSubmit={handleSubmit}
+        onFileSelect={handleFileSelect}
+        onRemoveFilePreview={removeFilePreview}
+        onToggleEmojiPicker={() => setShowEmojiPicker((prev) => !prev)}
+        onHideEmojiPicker={() => setShowEmojiPicker(false)}
+        onEmojiSelect={handleEmojiSelect}
+        onVoiceRecordingComplete={handleVoiceRecordingComplete}
+        onRecorderOpenChange={handleRecorderOpenChange}
+        onRecorderError={(msg) => toast.error(msg)}
+      />
     </section>
   );
 }

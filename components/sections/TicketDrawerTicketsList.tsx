@@ -1,26 +1,19 @@
 "use client";
 
 import { useCallback, useEffect, useRef, useState } from "react";
-import {
-  FiChevronDown,
-  FiChevronRight,
-  FiPaperclip,
-} from "react-icons/fi";
 import { toast } from "sonner";
 import { postCreateTicketReviewByChatId } from "@/lib/chat/createTicketReviewByChatId";
 import { parseTicketListRow } from "@/lib/chat/ticketList";
 import type { CustomerChatTicket } from "@/lib/chat/types";
-import { cn } from "@/lib/utils";
-
-/** Matches secondary actions in {@link ChatWindowSection} (e.g. Info / Ticket). */
-const CHAT_HEADER_SECONDARY_BTN =
-  "h-8 px-2 inline-flex items-center justify-center gap-1.5 rounded-lg border border-gray-200 " +
-  "text-gray-700 text-xs font-medium whitespace-nowrap shrink-0 " +
-  "hover:border-brand-300 hover:bg-brand-50 hover:text-brand-600 transition-colors cursor-pointer";
+import { TicketListItem } from "./ticket-drawer/TicketListItem";
 
 type Props = {
   /** Logged-in agent — `Userid` query param for SES. */
   agentUserId: string;
+  /** SES domain index used by review submit API. */
+  domainIndex?: number | null;
+  /** SES module index used by review submit API. */
+  moduleIndex?: number | null;
   /** WhatsApp chat index for the active conversation. */
   chatIndex?: string | number | null;
   /** Customer phone (CLI). */
@@ -109,58 +102,10 @@ async function fetchTicketDetailsByIndexPtr(
   return null;
 }
 
-function formatTicketDateTime(raw: string | undefined): string {
-  const t = (raw ?? "").trim();
-  if (!t) return "—";
-  const normalized = /^\d{4}-\d{2}-\d{2} \d/.test(t) ? t.replace(" ", "T") : t;
-  const d = new Date(normalized);
-  if (Number.isNaN(d.getTime())) return t;
-  return d.toLocaleString(undefined, {
-    year: "numeric",
-    month: "short",
-    day: "numeric",
-    hour: "2-digit",
-    minute: "2-digit",
-  });
-}
-
-function humanizeKey(key: string): string {
-  return key
-    .replace(/_/g, " ")
-    .replace(/\b\w/g, (c) => c.toUpperCase())
-    .trim();
-}
-
-function sortedFollowups(ticket: CustomerChatTicket) {
-  const list = ticket.followupHistory ?? [];
-  return [...list].sort((a, b) => {
-    const ia = a.index ?? 0;
-    const ib = b.index ?? 0;
-    if (ia !== ib) return ia - ib;
-    return String(a.followupDate ?? "").localeCompare(
-      String(b.followupDate ?? ""),
-    );
-  });
-}
-
-function DetailLine({
-  label,
-  value,
-}: {
-  label: string;
-  value: string;
-}) {
-  if (!value.trim()) return null;
-  return (
-    <div className="grid grid-cols-[8.5rem_1fr] gap-x-2 gap-y-1 text-xs sm:grid-cols-[10rem_1fr]">
-      <dt className="font-medium text-gray-500">{label}</dt>
-      <dd className="min-w-0 text-gray-800 wrap-break-word">{value}</dd>
-    </div>
-  );
-}
-
 export function TicketDrawerTicketsList({
   agentUserId,
+  domainIndex,
+  moduleIndex,
   chatIndex,
   cli,
   tickets,
@@ -261,6 +206,14 @@ export function TicketDrawerTicketsList({
         toast.error("Agent session is not available.");
         return;
       }
+      if (domainIndex === undefined || domainIndex === null) {
+        toast.error("Domain index is missing; refresh chats and try again.");
+        return;
+      }
+      if (moduleIndex === undefined || moduleIndex === null) {
+        toast.error("Module index is missing; refresh chats and try again.");
+        return;
+      }
 
       setSavingReviewForTicketNo(ticket.ticketNo);
       try {
@@ -269,6 +222,8 @@ export function TicketDrawerTicketsList({
           ticketIndex,
           review,
           cli: cliNorm,
+          domainIndex: Math.trunc(domainIndex),
+          moduleIndex: Math.trunc(moduleIndex),
         });
         toast.success(`Review saved for ticket ${ticket.ticketNo}.`);
         setReviewOpenFor(null);
@@ -285,7 +240,7 @@ export function TicketDrawerTicketsList({
         setSavingReviewForTicketNo(null);
       }
     },
-    [agentUserId, chatIndex, cli, reviewDraftByTicket],
+    [agentUserId, chatIndex, cli, domainIndex, moduleIndex, reviewDraftByTicket],
   );
 
   return (
@@ -312,365 +267,36 @@ export function TicketDrawerTicketsList({
                 }
               : ticket;
             const open = expandedNo === ticket.ticketNo;
-            const followups = sortedFollowups(ticketView);
             const reviewOpen = reviewOpenFor === ticket.ticketNo;
             const reviewDraft = reviewDraftByTicket[ticket.ticketNo] ?? "";
             const savingReview = savingReviewForTicketNo === ticket.ticketNo;
             const detailLoading = Boolean(loadingByTicketNo[ticket.ticketNo]);
-            const isClosed =
-              ticketView.ticketStatus.trim().toLowerCase() === "closed";
             return (
-              <article
+              <TicketListItem
                 key={ticket.ticketNo}
-                className="rounded-xl border border-gray-200 bg-white shadow-sm"
-              >
-                <div className="flex w-full items-start justify-between gap-3 px-3 py-3 transition-colors hover:bg-gray-50 sm:gap-4 sm:px-4">
-                  <div className="min-w-0 flex-1 pr-1">
-                    {/* max-md: stacked rows + full-width text; md+: 2-col grid */}
-                    <div className="grid max-md:grid-cols-[1fr_auto] max-md:gap-x-2 max-md:gap-y-2 md:grid-cols-[minmax(0,1fr)_auto] md:gap-x-3 md:gap-y-1.5">
-                        <button
-                          type="button"
-                          onClick={() => handleToggleTicket(ticket)}
-                          aria-expanded={open}
-                          aria-label={
-                            open
-                              ? `Collapse ticket ${ticket.ticketNo}`
-                              : `Expand ticket ${ticket.ticketNo}`
-                          }
-                          className={cn(
-                            "flex min-w-0 items-center md:items-start gap-2 rounded-lg text-left outline-none focus-visible:ring-2 focus-visible:ring-brand-400 focus-visible:ring-offset-2 cursor-pointer md:col-start-1 md:row-start-1 md:w-auto md:max-w-none",
-                            isClosed
-                              ? "max-md:col-span-2 max-md:row-start-1 max-md:w-full"
-                              : "max-md:col-start-1 max-md:row-start-1 max-md:min-w-0",
-                          )}
-                        >
-                          <span className="mt-0.5 shrink-0 text-gray-400">
-                            {open ? (
-                              <FiChevronDown className="h-4 w-4" aria-hidden />
-                            ) : (
-                              <FiChevronRight className="h-4 w-4" aria-hidden />
-                            )}
-                          </span>
-                          <p className="min-w-0 wrap-break-word font-mono text-sm tracking-tight text-blue-900 max-md:whitespace-normal md:truncate">
-                            {ticket.ticketNo}
-                          </p>
-                        </button>
-
-                        <div
-                          ref={reviewOpen ? reviewMenuRef : null}
-                          className="max-md:contents md:col-start-2 md:row-start-1 md:flex md:shrink-0 md:flex-row md:items-center md:justify-end md:gap-2"
-                        >
-                          <span
-                            className={cn(
-                              "inline-flex rounded-full bg-gray-100 px-2.5 py-0.5 text-xs font-medium text-gray-700 max-md:col-span-2 max-md:row-start-2 max-md:max-w-none max-md:justify-self-start max-md:whitespace-normal max-md:wrap-break-word md:inline-flex md:max-w-38 md:truncate md:text-right",
-                              "ring-1 ring-inset ring-gray-200/80",
-                            )}
-                            style={
-                              ticketView.statusColor
-                                ? {
-                                    color: ticketView.statusColor,
-                                    borderColor: ticketView.statusColor,
-                                    backgroundColor: `${ticketView.statusColor}1A`,
-                                  }
-                                : undefined
-                            }
-                            title={ticketView.ticketStatus}
-                          >
-                            {ticketView.ticketStatus}
-                          </span>
-                          {!isClosed ? (
-                            <div className="relative max-md:col-start-2 max-md:row-start-1 max-md:justify-self-end max-md:self-start md:relative">
-                              <button
-                                type="button"
-                                onClick={() =>
-                                  setReviewOpenFor((prev) =>
-                                    prev === ticket.ticketNo ? null : ticket.ticketNo,
-                                  )
-                                }
-                                className={CHAT_HEADER_SECONDARY_BTN}
-                              >
-                                Review
-                              </button>
-                              {reviewOpen ? (
-                                <div className="absolute right-0 top-full z-20 mt-2 w-[min(22rem,75vw)] rounded-lg border border-gray-200 bg-white p-3 shadow-lg">
-                                  <p className="mb-2 text-xs font-medium text-gray-700">
-                                    Review ticket # {ticket.ticketNo}
-                                  </p>
-                                  <textarea
-                                    value={reviewDraft}
-                                    onChange={(e) =>
-                                      setReviewDraftByTicket((prev) => ({
-                                        ...prev,
-                                        [ticket.ticketNo]: e.target.value,
-                                      }))
-                                    }
-                                    rows={4}
-                                    placeholder="Write your review"
-                                    className="w-full resize-y rounded-lg border border-gray-200 bg-white px-3 py-2 text-sm text-gray-900 placeholder:text-gray-400 focus:border-brand-400 focus:outline-none focus:ring-1 focus:ring-brand-400"
-                                  />
-                                  <div className="mt-2 flex justify-end gap-2">
-                                    <button
-                                      type="button"
-                                      disabled={savingReview}
-                                      onClick={() => setReviewOpenFor(null)}
-                                      className="rounded-lg border border-gray-200 bg-white px-3 py-1.5 text-xs font-medium text-gray-700 transition-colors hover:bg-gray-50 cursor-pointer disabled:opacity-50"
-                                    >
-                                      Cancel
-                                    </button>
-                                    <button
-                                      type="button"
-                                      disabled={savingReview}
-                                      onClick={() => void saveReview(ticket)}
-                                      className="rounded-lg border border-brand-600 bg-brand-600 px-3 py-1.5 text-xs font-medium text-white transition-colors hover:bg-brand-700 cursor-pointer disabled:opacity-50"
-                                    >
-                                      {savingReview ? "Saving…" : "Save"}
-                                    </button>
-                                  </div>
-                                </div>
-                              ) : null}
-                            </div>
-                          ) : null}
-                        </div>
-
-                      <p className="col-start-2 row-start-2 shrink-0 text-xs text-gray-400 max-md:col-span-2 max-md:row-start-3 max-md:text-left md:text-right">
-                        Registered{" "}
-                        {formatTicketDateTime(
-                          ticketView.ticketRegisteredAt || ticketView.reportedDate,
-                        )}
-                      </p>
-                      <p className="col-start-1 row-start-2 text-xs leading-snug text-gray-500 line-clamp-2 max-md:col-span-2 max-md:row-start-4 max-md:line-clamp-none max-md:wrap-break-word">
-                        <span className="font-medium text-gray-500">
-                          Complaint type:
-                        </span>{" "}
-                        <span className="font-medium text-gray-500">
-                          {ticketView.complaintType || "—"}
-                        </span>
-                      </p>
-                      <p className="col-start-1 row-start-3 text-xs leading-snug text-gray-500 line-clamp-2 max-md:col-span-2 max-md:row-start-5 max-md:line-clamp-none max-md:wrap-break-word md:col-span-1">
-                        <span className="font-medium text-gray-500">
-                          Complaint sub-type:
-                        </span>{" "}
-                        <span className="font-medium text-gray-500">
-                          {ticketView.complaintSubType || "—"}
-                        </span>
-                      </p>
-                    </div>
-                  </div>
-                </div>
-
-                {open ? (
-                  <div className="space-y-4 border-t border-gray-100 px-3 pb-4 pt-2 sm:px-4">
-                    {detailLoading ? (
-                      <p className="rounded-lg border border-dashed border-gray-200 bg-gray-50 px-3 py-2 text-xs text-gray-500">
-                        Loading ticket details…
-                      </p>
-                    ) : null}
-                    {followups.length > 0 ? (
-                      <section
-                        aria-label="Follow-up history"
-                        className="rounded-lg border border-gray-300 bg-gray-50/80 p-3"
-                      >
-                        <h3 className="text-xs font-semibold uppercase tracking-wide text-brand-500">
-                          Follow-up history
-                        </h3>
-                        <ol className="mt-2 space-y-3">
-                          {followups.map((f, i) => (
-                            <li
-                              key={`${f.index ?? i}-${f.followupDate ?? i}`}
-                              className="flex gap-3 text-xs"
-                            >
-                              <span
-                                className="mt-1.5 h-2 w-2 shrink-0 rounded-full ring-2 ring-white"
-                                style={{
-                                  backgroundColor:
-                                    f.statusColor?.trim() || "#6b7280",
-                                }}
-                                aria-hidden
-                              />
-                              <div className="min-w-0 flex-1">
-                                <div className="flex flex-wrap items-baseline gap-x-2 gap-y-0.5">
-                                  <span className="font-semibold text-gray-900">
-                                    {f.statusText ?? "Update"}
-                                  </span>
-                                  <span className="text-gray-500">
-                                    {formatTicketDateTime(f.followupDate)}
-                                  </span>
-                                </div>
-                                {f.followupBy ? (
-                                  <p className="mt-0.5 text-gray-600">
-                                    By {f.followupBy}
-                                  </p>
-                                ) : null}
-                                {f.remarks ? (
-                                  <p className="mt-1 whitespace-pre-wrap text-gray-800">
-                                    <span className="font-semibold text-gray-500">Remarks:</span> {f.remarks}
-                                  </p>
-                                ) : null}
-                              </div>
-                            </li>
-                          ))}
-                        </ol>
-                      </section>
-                    ) : (
-                      <p className="rounded-lg border border-dashed border-gray-200 bg-gray-50 px-3 py-2 text-xs text-gray-500">
-                        No follow-up history on this ticket yet.
-                      </p>
-                    )}
-
-                    {/* <section className="space-y-2">
-                      <h3 className="text-xs font-semibold uppercase tracking-wide text-gray-500">
-                        Ticket details
-                      </h3>
-                      <dl className="space-y-2">
-                        <DetailLine
-                          label="Domain"
-                          value={ticket.domain ?? ""}
-                        />
-                        <DetailLine
-                          label="Complaint type"
-                          value={ticket.complaintType ?? ""}
-                        />
-                        <DetailLine
-                          label="Complaint sub-type"
-                          value={ticket.complaintSubType ?? ""}
-                        />
-                        <DetailLine
-                          label="Nature"
-                          value={ticket.nature ?? ""}
-                        />
-                        <DetailLine
-                          label="Priority"
-                          value={
-                            [ticket.priority, ticket.priorityLevel]
-                              .filter(Boolean)
-                              .join(" · ") ?? ""
-                          }
-                        />
-                        <DetailLine
-                          label="Reported by"
-                          value={ticket.reportedBy ?? ""}
-                        />
-                        <DetailLine
-                          label="Location"
-                          value={(ticket.location ?? "").trim()}
-                        />
-                        <DetailLine
-                          label="Problem occurred"
-                          value={formatTicketDateTime(
-                            ticket.problemOccuredDate,
-                          )}
-                        />
-                        <DetailLine
-                          label="Brief"
-                          value={ticket.briefDescription ?? ""}
-                        />
-                        <DetailLine
-                          label="Detailed"
-                          value={ticket.detailedDescription ?? ""}
-                        />
-                      </dl>
-                    </section> */}
-
-                    {/* {ticketView.dynamicFields &&
-                    Object.keys(ticketView.dynamicFields).length > 0 ? (
-                      <section className="space-y-2">
-                        <h3 className="text-xs font-semibold uppercase tracking-wide text-gray-500">
-                          Additional fields
-                        </h3>
-                        <dl className="space-y-2">
-                          {Object.entries(ticketView.dynamicFields).map(
-                            ([key, val]) => (
-                              <DetailLine
-                                key={key}
-                                label={humanizeKey(key)}
-                                value={val}
-                              />
-                            ),
-                          )}
-                        </dl>
-                      </section>
-                    ) : null} */}
-
-                    {/* {ticketView.attachmentHistory &&
-                    ticketView.attachmentHistory.length > 0 ? (
-                      <section className="space-y-2">
-                        <h3 className="flex items-center gap-1.5 text-xs font-semibold uppercase tracking-wide text-gray-500">
-                          <FiPaperclip className="h-3.5 w-3.5" aria-hidden />
-                          Attachments
-                        </h3>
-                        <ul className="space-y-1.5 text-xs text-gray-700">
-                          {ticketView.attachmentHistory.map((a, idx) => (
-                            <li
-                              key={`${a.actual ?? a.filename ?? idx}`}
-                              className="rounded-md border border-gray-100 bg-gray-50 px-2 py-1.5"
-                            >
-                              <span className="font-medium">
-                                {a.filename ?? a.actual ?? "File"}
-                              </span>
-                              {a.created ? (
-                                <span className="text-gray-500">
-                                  {" "}
-                                  · {a.created}
-                                </span>
-                              ) : null}
-                            </li>
-                          ))}
-                        </ul>
-                      </section>
-                    ) : null}
-
-                    {ticketView.assignmentHistory &&
-                    ticketView.assignmentHistory.length > 0 ? (
-                      <section className="space-y-2">
-                        <h3 className="text-xs font-semibold uppercase tracking-wide text-gray-500">
-                          Assignment history
-                        </h3>
-                        <ul className="space-y-2 text-xs text-gray-700">
-                          {ticketView.assignmentHistory.map((row, idx) => (
-                            <li
-                              key={`${row.teamName ?? ""}-${idx}`}
-                              className="rounded-md border border-gray-100 bg-gray-50 px-2 py-1.5"
-                            >
-                              <span className="font-medium">
-                                {row.teamName ?? "Team"}
-                              </span>
-                              {row.engineerName ? (
-                                <span> · {row.engineerName}</span>
-                              ) : null}
-                              {row.assignDate ? (
-                                <div className="mt-0.5 text-gray-500">
-                                  {row.assignDate}
-                                </div>
-                              ) : null}
-                            </li>
-                          ))}
-                        </ul>
-                      </section>
-                    ) : null} */}
-
-                    {/* {ticketView.actionTakenList &&
-                    Object.keys(ticketView.actionTakenList).length > 0 ? (
-                      <section className="space-y-2">
-                        <h3 className="text-xs font-semibold uppercase tracking-wide text-gray-500">
-                          Actions
-                        </h3>
-                        <div className="flex flex-wrap gap-1.5">
-                          {Object.entries(ticketView.actionTakenList).map(
-                            ([id, label]) => (
-                              <span
-                                key={id}
-                                className="inline-flex rounded-md border border-gray-200 bg-white px-2 py-0.5 text-xs font-medium text-gray-700"
-                              >
-                                {label}
-                              </span>
-                            ),
-                          )}
-                        </div>
-                      </section>
-                    ) : null} */}
-                  </div>
-                ) : null}
-              </article>
+                ticket={ticket}
+                ticketView={ticketView}
+                open={open}
+                detailLoading={detailLoading}
+                reviewOpen={reviewOpen}
+                reviewDraft={reviewDraft}
+                savingReview={savingReview}
+                reviewMenuRef={reviewMenuRef}
+                onToggleTicket={() => handleToggleTicket(ticket)}
+                onToggleReview={() =>
+                  setReviewOpenFor((prev) =>
+                    prev === ticket.ticketNo ? null : ticket.ticketNo,
+                  )
+                }
+                onReviewDraftChange={(value) =>
+                  setReviewDraftByTicket((prev) => ({
+                    ...prev,
+                    [ticket.ticketNo]: value,
+                  }))
+                }
+                onCancelReview={() => setReviewOpenFor(null)}
+                onSaveReview={() => void saveReview(ticket)}
+              />
             );
           })
         )}

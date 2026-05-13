@@ -146,6 +146,16 @@ export function AgentDashboard() {
     }
   }, []);
 
+  const hasConversationMessages =
+    Boolean(chat.activeChatId) && chat.activeMessages.length > 0;
+  const customerInfoProps = {
+    customer: chat.activeChat?.customer ?? null,
+    ticketList: chat.activeChat?.ticketList,
+    ticketsLoading: chat.ticketListLoading,
+    hasConversationMessages,
+    onClose: () => setShowCustomerInfo(false),
+  };
+
   return (
     <div
       className="flex h-full min-h-0 w-full flex-1 flex-col overflow-hidden"
@@ -214,6 +224,8 @@ export function AgentDashboard() {
               ticketEmailTemplates={chat.ticketEmailTemplates}
               ticketSmsTemplates={chat.ticketSmsTemplates}
               agentUserId={STATIC_AGENT.id}
+              ticketDomainIndex={chat.domainIndex}
+              ticketModuleIndex={chat.moduleIndex}
               onTransferToQueue={chat.transferToQueue}
               onTransferToAgent={chat.transferToAgent}
               ticketList={chat.activeChat?.ticketList}
@@ -254,15 +266,7 @@ export function AgentDashboard() {
                   className="fixed right-0 z-40 flex w-[92vw] max-w-[360px] flex-col overflow-hidden border-l border-gray-200 bg-white shadow-none xl:hidden"
                 >
                   <div className="h-full [&>aside]:h-full [&>aside]:w-full [&>aside]:min-w-0">
-                    <CustomerInfoSidebarSection
-                      customer={chat.activeChat?.customer ?? null}
-                      ticketList={chat.activeChat?.ticketList}
-                      ticketsLoading={chat.ticketListLoading}
-                      hasConversationMessages={
-                        Boolean(chat.activeChatId) && chat.activeMessages.length > 0
-                      }
-                      onClose={() => setShowCustomerInfo(false)}
-                    />
+                    <CustomerInfoSidebarSection {...customerInfoProps} />
                   </div>
                   </motion.aside>
                 ) : (
@@ -274,15 +278,7 @@ export function AgentDashboard() {
                   transition={{ duration: 0.2, ease: "easeInOut" }}
                   className="z-20 overflow-hidden shrink-0"
                 >
-                  <CustomerInfoSidebarSection
-                    customer={chat.activeChat?.customer ?? null}
-                    ticketList={chat.activeChat?.ticketList}
-                    ticketsLoading={chat.ticketListLoading}
-                    hasConversationMessages={
-                      Boolean(chat.activeChatId) && chat.activeMessages.length > 0
-                    }
-                    onClose={() => setShowCustomerInfo(false)}
-                  />
+                  <CustomerInfoSidebarSection {...customerInfoProps} />
                   </motion.div>
                 )}
               </>

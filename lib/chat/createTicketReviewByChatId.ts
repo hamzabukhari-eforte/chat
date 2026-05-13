@@ -1,6 +1,6 @@
 const DEFAULT_HTTP_API_ORIGIN = "http://10.0.10.53:8080";
 const DEFAULT_CREATE_TICKET_REVIEW_PATH =
-  "/SES/SocialMedia/whatsapp/createTicketReviewByChatId";
+  "/SES/app/SocialMedia/whatsapp/createTicketReviewByChatId";
 
 function getDefaultApiOrigin(): string {
   if (typeof window === "undefined") return DEFAULT_HTTP_API_ORIGIN;
@@ -38,10 +38,14 @@ export type CreateTicketReviewByChatIdBody = {
   review: string;
   /** Customer phone (CLI). */
   cli: string;
+  /** SES `domainIndex` required by backend review endpoint. */
+  domainIndex: number;
+  /** SES `moduleIndex` required by backend review endpoint. */
+  moduleIndex: number;
 };
 
 /**
- * POST `/SES/SocialMedia/whatsapp/createTicketReviewByChatId`.
+ * POST `/SES/app/SocialMedia/whatsapp/createTicketReviewByChatId`.
  * Mirrors `getTicketListByChatId`: `Userid` query param for the agent session.
  */
 export async function postCreateTicketReviewByChatId(
@@ -58,6 +62,8 @@ export async function postCreateTicketReviewByChatId(
       ticketIndex: body.ticketIndex,
       review: body.review,
       cli: body.cli,
+      domainIndex: body.domainIndex,
+      moduleIndex: body.moduleIndex,
     }),
   });
   if (!res.ok) {

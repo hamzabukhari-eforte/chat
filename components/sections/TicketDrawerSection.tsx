@@ -10,7 +10,6 @@ import {
 } from "react";
 import { useDropzone } from "react-dropzone";
 import { AnimatePresence, motion } from "framer-motion";
-import { HiOutlineTicket } from "react-icons/hi2";
 import { FiX } from "react-icons/fi";
 import { toast } from "sonner";
 import { DateTimePickerField } from "@/components/atoms/DateTimePickerField";
@@ -27,11 +26,8 @@ import type { CustomerChatTicket } from "@/lib/chat/types";
 import { AGENT_APP_HEADER_HEIGHT_VAR } from "@/lib/layout/agentAppLayout";
 import { cn } from "@/lib/utils";
 import { TicketDrawerTicketsList } from "./TicketDrawerTicketsList";
-
-/** Same outline style as the main "Ticket" control in {@link ChatWindowSection}. */
-const CHAT_HEADER_OUTLINED_BTN =
-  "h-8 px-4 flex items-center gap-1.5 rounded-lg border border-gray-200 text-gray-700 text-xs font-medium " +
-  "hover:border-brand-300 hover:bg-brand-50 hover:text-brand-600 transition-colors cursor-pointer shrink-0";
+import { TicketDrawerPanelHeader } from "./ticket-drawer/TicketDrawerPanelHeader";
+import { TicketDynamicFieldsSection } from "./ticket-drawer/TicketDynamicFieldsSection";
 
 export type TicketSelectOption = { id: string; name: string };
 
@@ -40,6 +36,10 @@ type Props = {
   onOpenChange: (open: boolean) => void;
   /** Logged-in agent id — sent to SES `registercomplaint/view` with domain lookups. */
   agentUserId: string;
+  /** SES context for ticket review submit payload. */
+  domainIndex?: number | null;
+  /** SES context for ticket review submit payload. */
+  moduleIndex?: number | null;
   /** Phone number of the currently selected chat/customer. */
   customerPhone?: string;
   /** From `getQueueNAssignedChats` → `domainList`. */
@@ -694,6 +694,7 @@ function TicketDrawerFormBody({
                   id="ticket-problem-occurred"
                   label="Problem Occurred"
                   required
+                  disableFuture
                   value={fields.problemOccurred}
                   onChange={(v) => setField("problemOccurred", v)}
                 />
@@ -830,100 +831,17 @@ function TicketDrawerFormBody({
                 />
               </div>
 
-              {additionalFieldsLoading || additionalFields.length > 0 ? (
-                <div className="space-y-3 my-5 py-3 border-y border-gray-200">
-                  <div>
-                    <h3 className="text-base font-semibold text-blue-700 pb-2">
-                      Additional Information
-                    </h3>
-                    {/* {additionalFormName ? (
-                      <p className="mt-0.5 text-xs text-gray-500">
-                        {additionalFormName}
-                      </p>
-                    ) : null} */}
-                  </div>
-                  {additionalFieldsLoading && additionalFields.length === 0 ? (
-                    <p className="text-xs text-gray-500">
-                      Loading additional fields…
-                    </p>
-                  ) : null}
-                  <div className="grid grid-cols-1 gap-4 sm:grid-cols-3">
-                    {additionalFields.map((f) => {
-                      const inputId = `ticket-dyn-${f.key.replace(/[^a-zA-Z0-9_-]/g, "-")}`;
-                      const value = dynamicFieldValues[f.key] ?? "";
-                      const setValue = (v: string) =>
-                        setDynamicFieldValues((prev) => ({
-                          ...prev,
-                          [f.key]: v,
-                        }));
-                      const selectLike =
-                        f.options.length > 0 ||
-                        f.type === "select" ||
-                        f.type === "dropdown";
-                      if (selectLike && f.options.length > 0) {
-                        return (
-                          <div key={f.key} className="min-w-0">
-                            <SearchableSelect
-                              id={inputId}
-                              label={f.name}
-                              value={value}
-                              onValueChange={setValue}
-                              options={f.options}
-                              searchPlaceholder={`Search ${f.name.toLowerCase()}...`}
-                              emptyMessage="No options."
-                            />
-                          </div>
-                        );
-                      }
-                      if (f.type === "textarea") {
-                        return (
-                          <div
-                            key={f.key}
-                            className="min-w-0 sm:col-span-3"
-                          >
-                            <label
-                              htmlFor={inputId}
-                              className="block text-xs font-medium text-gray-700"
-                            >
-                              {f.name}
-                            </label>
-                            <textarea
-                              id={inputId}
-                              rows={4}
-                              value={value}
-                              onChange={(e) => setValue(e.target.value)}
-                              placeholder={f.name}
-                              className="mt-1 w-full resize-y rounded-lg border border-gray-200 bg-white px-3 py-2 text-sm text-gray-900 outline-none transition-colors placeholder:text-gray-400 focus:border-brand-500 focus:ring-1 focus:ring-brand-500"
-                            />
-                          </div>
-                        );
-                      }
-                      return (
-                        <div key={f.key} className="min-w-0 flex flex-col justify-between">
-                          <label
-                            htmlFor={inputId}
-                            className="block text-xs font-medium text-gray-700"
-                          >
-                            {f.name}
-                          </label>
-                          <input
-                            id={inputId}
-                            type={
-                              f.type === "number" || f.type === "numeric"
-                                ? "number"
-                                : "text"
-                            }
-                            value={value}
-                            onChange={(e) => setValue(e.target.value)}
-                            placeholder={f.name}
-                            className="mt-1 w-full rounded-lg border border-gray-200 bg-white px-3 py-2 text-sm text-gray-900 outline-none transition-colors placeholder:text-gray-400 focus:border-brand-500 focus:ring-1 focus:ring-brand-500"
-                          />
-                        </div>
-                      );
-                    })}
-                  </div>
-                </div>
-              ) : null}
+              <TicketDynamicFieldsSection
+                additionalFieldsLoading={additionalFieldsLoading}
+                additionalFields={additionalFields}
+                dynamicFieldValues={dynamicFieldValues}
+                onValueChange={(key, value) =>
+                  setDynamicFieldValues((prev) => ({
+                    ...prev,
+                    [key]: value,
+                  }))
+                }
+              />
 
               <div>
                 <span className="block text-xs font-medium text-gray-700">
@@ -1030,6 +948,8 @@ export function TicketDrawerSection({
   open,
   onOpenChange,
   agentUserId,
+  domainIndex,
+  moduleIndex,
   customerPhone,
   domainOptions,
   emailTemplateOptions,
@@ -1096,52 +1016,21 @@ export function TicketDrawerSection({
               "border-0 border-r border-gray-200 shadow-none",
             )}
           >
-            <header className="flex shrink-0 flex-row items-center justify-between gap-2 border-b border-gray-100 p-4 sm:gap-3">
-            <div className="flex min-w-0 flex-1 items-center gap-2">
-              <HiOutlineTicket
-                className="h-5 w-5 shrink-0 text-brand-600"
-                aria-hidden
-              />
-              <div className="min-w-0">
-                <h2
-                  id={titleId}
-                  className="text-base text-brand-500 font-semibold leading-none"
-                >
-                  {drawerView === "list" ? "Tickets" : "Register Complaint"}
-                </h2>
-                <p id={descriptionId} className="sr-only">
-                  {drawerView === "list"
-                    ? "Tickets for this conversation. Use Create new ticket in the header, or expand a card for details and review."
-                    : "Register a new complaint using the form below."}
-                </p>
-              </div>
-            </div>
-            <div className="flex shrink-0 items-center gap-2">
-              <button
-                type="button"
-                onClick={() =>
-                  setDrawerView((prev) => (prev === "list" ? "form" : "list"))
-                }
-                className={CHAT_HEADER_OUTLINED_BTN}
-              >
-                {drawerView === "list"
-                  ? "Create new ticket"
-                  : "View recent tickets"}
-              </button>
-              <button
-                type="button"
-                onClick={() => onOpenChange(false)}
-                aria-label="Close ticket panel"
-                className="flex h-8 w-8 shrink-0 items-center justify-center rounded-lg border border-gray-200 text-gray-500 transition-colors hover:border-brand-300 hover:bg-brand-50 hover:text-brand-600 cursor-pointer"
-              >
-                <FiX className="h-4 w-4" />
-              </button>
-            </div>
-          </header>
+            <TicketDrawerPanelHeader
+              titleId={titleId}
+              descriptionId={descriptionId}
+              drawerView={drawerView}
+              onToggleView={() =>
+                setDrawerView((prev) => (prev === "list" ? "form" : "list"))
+              }
+              onClose={() => onOpenChange(false)}
+            />
 
             {drawerView === "list" ? (
               <TicketDrawerTicketsList
                 agentUserId={agentUserId}
+                domainIndex={domainIndex}
+                moduleIndex={moduleIndex}
                 chatIndex={chatIndex}
                 cli={customerPhone}
                 tickets={ticketList}

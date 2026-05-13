@@ -53,16 +53,16 @@ const WS_FILE_WAIT_ACK_AFTER_EACH_CHUNK = false;
 
 const DEFAULT_HTTP_API_ORIGIN = "http://10.0.10.53:8080";
 const DEFAULT_QUEUE_CHATS_PATH =
-  "/SES/SocialMedia/whatsapp/getQueueNAssignedChats";
+  "/SES/app/SocialMedia/whatsapp/getQueueNAssignedChats";
 const DEFAULT_LOAD_CONVERSATION_PATH =
-  "/SES/SocialMedia/whatsapp/loadConversationById";
-const DEFAULT_ASSIGN_CHAT_PATH = "/SES/SocialMedia/whatsapp/assignChat";
-const DEFAULT_TRANSFER_CHAT_PATH = "/SES/SocialMedia/whatsapp/transferChat";
-const DEFAULT_CLOSE_CHAT_PATH = "/SES/SocialMedia/whatsapp/closeChat";
+  "/SES/app/SocialMedia/whatsapp/loadConversationById";
+const DEFAULT_ASSIGN_CHAT_PATH = "/SES/app/SocialMedia/whatsapp/assignChat";
+const DEFAULT_TRANSFER_CHAT_PATH = "/SES/app/SocialMedia/whatsapp/transferChat";
+const DEFAULT_CLOSE_CHAT_PATH = "/SES/app/SocialMedia/whatsapp/closeChat";
 const DEFAULT_TICKET_LIST_BY_CHAT_ID_PATH =
-  "/SES/SocialMedia/whatsapp/getTicketListByChatId";
+  "/SES/app/SocialMedia/whatsapp/getTicketListByChatId";
 const DEFAULT_AUTO_ASSIGNMENT_STATUS_PATH =
-  "/SES/SocialMedia/whatsapp/getAutoAssignmentStatus";
+  "/SES/app/SocialMedia/whatsapp/getAutoAssignmentStatus";
 const DEFAULT_CHAT_WS_HOST = "10.0.10.53:8080";
 const DEFAULT_CHAT_WS_PATH = "/SES/WebLiveChat";
 
@@ -247,6 +247,7 @@ interface QueueNAssignedRow {
 
 interface QueueNAssignedChatsResponse {
   domainIndex?: number;
+  moduleIndex?: number;
   chatFrom?: number;
   userId?: string;
   /**
@@ -898,6 +899,7 @@ async function fetchQueueAndAssignedChats(agent: User): Promise<{
   chats: Chat[];
   initializer: BackendWsInitializer | null;
   domainIndex: number | null;
+  moduleIndex: number | null;
   chatFrom: number | null;
   transferAgents: TransferAgentOption[];
   ticketDomains: { id: string; name: string }[];
@@ -931,14 +933,18 @@ async function fetchQueueAndAssignedChats(agent: User): Promise<{
     mapQueueRowToChat(r, "assigned", agent),
   );
   const initializer =
-    data.userId && data.domainIndex !== undefined && data.chatFrom !== undefined
+    data.userId &&
+    data.domainIndex !== undefined &&
+    (data.chatFrom !== undefined || data.moduleIndex !== undefined)
       ? {
           chatroomId: "0" as const,
           userId: String(data.userId),
           type: "initializer" as const,
           From: "Agent" as const,
           domainIndex: Number(data.domainIndex),
-          chatFrom: Number(data.chatFrom),
+          chatFrom: Number(
+            data.chatFrom !== undefined ? data.chatFrom : data.moduleIndex,
+          ),
         }
       : null;
 
@@ -947,7 +953,18 @@ async function fetchQueueAndAssignedChats(agent: User): Promise<{
     initializer,
     domainIndex:
       data.domainIndex !== undefined ? Number(data.domainIndex) : null,
-    chatFrom: data.chatFrom !== undefined ? Number(data.chatFrom) : null,
+    moduleIndex:
+      data.moduleIndex !== undefined
+        ? Number(data.moduleIndex)
+        : data.chatFrom !== undefined
+          ? Number(data.chatFrom)
+          : null,
+    chatFrom:
+      data.chatFrom !== undefined
+        ? Number(data.chatFrom)
+        : data.moduleIndex !== undefined
+          ? Number(data.moduleIndex)
+          : null,
     transferAgents,
     ticketDomains,
     ticketEmailTemplates,
@@ -1077,6 +1094,7 @@ interface State {
   isInitialLoading: boolean;
   showQueue: boolean;
   domainIndex: number | null;
+  moduleIndex: number | null;
   chatFrom: number | null;
   /** Agent id → display name from getQueueNAssignedChats `userList` (or legacy top-level numeric keys). */
   transferAgents: TransferAgentOption[];
@@ -1101,6 +1119,7 @@ const initialState: State = {
   isInitialLoading: true,
   showQueue: false,
   domainIndex: null,
+  moduleIndex: null,
   chatFrom: null,
   transferAgents: [],
   ticketDomains: [],
@@ -1400,78 +1419,93 @@ export function useWebSocketChat(currentUser: User | null) {
     }) => {
       const agentId = currentUser?.id;
       if (!agentId || currentUser.role !== "agent") return;
-      Promise.all([
+      Promise.allSettled([
         fetchQueueAndAssignedChats(currentUser),
-        fetchAutoAssignmentStatus(currentUser.id).catch(() => false),
+        fetchAutoAssignmentStatus(currentUser.id),
       ])
-        .then(([result, isAutoAssignmentEnabled]) => {
+        .then(([queueOutcome, autoOutcome]) => {
+          // Auto-assignment status drives sidebar layout independently of the
+          // queue API: if it succeeded, always honor its value even when the
+          // queue API failed, so showQueue isn't stuck on its initial default.
+          const autoStatusKnown = autoOutcome.status === "fulfilled";
+          const isAutoAssignmentEnabled = autoStatusKnown
+            ? autoOutcome.value
+            : false;
           const showQueue = !isAutoAssignmentEnabled;
-          client.setInitializer(result.initializer);
-          setState((prev) => {
-            const nextChats = mergeChatsById(prev.chats, result.chats);
-            const notifyAssignedChatId = opts?.notifyAssignedChatId;
-            if (notifyAssignedChatId && opts?.source === "chat-transfer") {
-              const wasMyChat = prev.chats.some(
-                (c) =>
-                  c.id === notifyAssignedChatId &&
-                  c.status !== "queued" &&
-                  c.agent?.id === agentId,
-              );
-              const isNowMyChat = nextChats.some(
-                (c) =>
-                  c.id === notifyAssignedChatId &&
-                  c.status !== "queued" &&
-                  c.agent?.id === agentId,
-              );
-              if (!wasMyChat && isNowMyChat) {
-                const lastToastAtMs =
-                  transferToastDedupRef.current[notifyAssignedChatId] ?? 0;
-                const nowMs = Date.now();
-                if (nowMs - lastToastAtMs < 4000) {
-                  return {
-                    ...prev,
-                    chats: nextChats,
-                    showQueue,
-                    domainIndex: result.domainIndex ?? prev.domainIndex,
-                    chatFrom: result.chatFrom ?? prev.chatFrom,
-                    transferAgents: result.transferAgents,
-                    ticketDomains: result.ticketDomains,
-                    ticketEmailTemplates: result.ticketEmailTemplates,
-                    ticketSmsTemplates: result.ticketSmsTemplates,
-                    awayReasons: result.awayReasons,
-                  };
-                }
-                transferToastDedupRef.current[notifyAssignedChatId] = nowMs;
-                const assignedUserNameRaw = opts.notifyAssignedUserName?.trim();
-                const assignedUserName =
-                  assignedUserNameRaw &&
-                  assignedUserNameRaw.toLowerCase() !== "undefined" &&
-                  assignedUserNameRaw.toLowerCase() !== "null"
-                    ? assignedUserNameRaw
-                    : undefined;
-                toast.success(
-                  assignedUserName
-                    ? `${assignedUserName}'s chat has been transferred to you.`
-                    : "A chat has been transferred to you.",
+
+          if (queueOutcome.status === "fulfilled") {
+            const result = queueOutcome.value;
+            client.setInitializer(result.initializer);
+            setState((prev) => {
+              const nextChats = mergeChatsById(prev.chats, result.chats);
+              const notifyAssignedChatId = opts?.notifyAssignedChatId;
+              if (notifyAssignedChatId && opts?.source === "chat-transfer") {
+                const wasMyChat = prev.chats.some(
+                  (c) =>
+                    c.id === notifyAssignedChatId &&
+                    c.status !== "queued" &&
+                    c.agent?.id === agentId,
                 );
+                const isNowMyChat = nextChats.some(
+                  (c) =>
+                    c.id === notifyAssignedChatId &&
+                    c.status !== "queued" &&
+                    c.agent?.id === agentId,
+                );
+                if (!wasMyChat && isNowMyChat) {
+                  const lastToastAtMs =
+                    transferToastDedupRef.current[notifyAssignedChatId] ?? 0;
+                  const nowMs = Date.now();
+                  if (nowMs - lastToastAtMs < 4000) {
+                    return {
+                      ...prev,
+                      chats: nextChats,
+                      showQueue,
+                      domainIndex: result.domainIndex ?? prev.domainIndex,
+                      moduleIndex: result.moduleIndex ?? prev.moduleIndex,
+                      chatFrom: result.chatFrom ?? prev.chatFrom,
+                      transferAgents: result.transferAgents,
+                      ticketDomains: result.ticketDomains,
+                      ticketEmailTemplates: result.ticketEmailTemplates,
+                      ticketSmsTemplates: result.ticketSmsTemplates,
+                      awayReasons: result.awayReasons,
+                    };
+                  }
+                  transferToastDedupRef.current[notifyAssignedChatId] = nowMs;
+                  const assignedUserNameRaw =
+                    opts.notifyAssignedUserName?.trim();
+                  const assignedUserName =
+                    assignedUserNameRaw &&
+                    assignedUserNameRaw.toLowerCase() !== "undefined" &&
+                    assignedUserNameRaw.toLowerCase() !== "null"
+                      ? assignedUserNameRaw
+                      : undefined;
+                  toast.success(
+                    assignedUserName
+                      ? `${assignedUserName}'s chat has been transferred to you.`
+                      : "A chat has been transferred to you.",
+                  );
+                }
               }
-            }
-            return {
-              ...prev,
-              chats: nextChats,
-              showQueue,
-              domainIndex: result.domainIndex ?? prev.domainIndex,
-              chatFrom: result.chatFrom ?? prev.chatFrom,
-              transferAgents: result.transferAgents,
-              ticketDomains: result.ticketDomains,
-              ticketEmailTemplates: result.ticketEmailTemplates,
-              ticketSmsTemplates: result.ticketSmsTemplates,
-              awayReasons: result.awayReasons,
-            };
-          });
-        })
-        .catch(() => {
-          // API optional; WebSocket demo may still update state.
+              return {
+                ...prev,
+                chats: nextChats,
+                showQueue,
+                domainIndex: result.domainIndex ?? prev.domainIndex,
+                moduleIndex: result.moduleIndex ?? prev.moduleIndex,
+                chatFrom: result.chatFrom ?? prev.chatFrom,
+                transferAgents: result.transferAgents,
+                ticketDomains: result.ticketDomains,
+                ticketEmailTemplates: result.ticketEmailTemplates,
+                ticketSmsTemplates: result.ticketSmsTemplates,
+                awayReasons: result.awayReasons,
+              };
+            });
+          } else if (autoStatusKnown) {
+            setState((prev) =>
+              prev.showQueue === showQueue ? prev : { ...prev, showQueue },
+            );
+          }
         })
         .finally(() => {
           setState((prev) =>
@@ -2479,6 +2513,8 @@ export function useWebSocketChat(currentUser: User | null) {
     activeChatId: state.activeChatId,
     isInitialLoading: state.isInitialLoading,
     showQueue: state.showQueue,
+    domainIndex: state.domainIndex,
+    moduleIndex: state.moduleIndex,
     transferAgents: state.transferAgents,
     ticketDomains: state.ticketDomains,
     ticketEmailTemplates: state.ticketEmailTemplates,
