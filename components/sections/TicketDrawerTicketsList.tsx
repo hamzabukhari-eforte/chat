@@ -20,6 +20,7 @@ type Props = {
   cli?: string;
   tickets: CustomerChatTicket[];
   loading: boolean;
+  createTicketReviewUrl?: string;
 };
 
 const DEFAULT_HTTP_API_ORIGIN = "http://10.0.10.53:8080";
@@ -110,6 +111,7 @@ export function TicketDrawerTicketsList({
   cli,
   tickets,
   loading,
+  createTicketReviewUrl,
 }: Props) {
   const [expandedNo, setExpandedNo] = useState<string | null>(null);
   const [ticketDetailsByNo, setTicketDetailsByNo] = useState<
@@ -217,14 +219,18 @@ export function TicketDrawerTicketsList({
 
       setSavingReviewForTicketNo(ticket.ticketNo);
       try {
-        await postCreateTicketReviewByChatId(uid, {
-          chatIndex,
-          ticketIndex,
-          review,
-          cli: cliNorm,
-          domainIndex: Math.trunc(domainIndex),
-          moduleIndex: Math.trunc(moduleIndex),
-        });
+        await postCreateTicketReviewByChatId(
+          uid,
+          {
+            chatIndex,
+            ticketIndex,
+            review,
+            cli: cliNorm,
+            domainIndex: Math.trunc(domainIndex),
+            moduleIndex: Math.trunc(moduleIndex),
+          },
+          { apiUrl: createTicketReviewUrl },
+        );
         toast.success(`Review saved for ticket ${ticket.ticketNo}.`);
         setReviewOpenFor(null);
         setReviewDraftByTicket((prev) => {

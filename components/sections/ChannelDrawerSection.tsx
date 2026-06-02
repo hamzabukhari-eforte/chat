@@ -1,23 +1,21 @@
 "use client";
 
 import { useState, type ReactNode } from "react";
-import { FiGlobe } from "react-icons/fi";
 import { AiOutlineMenuFold, AiOutlineMenuUnfold } from "react-icons/ai";
+import { HiOutlineChatBubbleLeftRight } from "react-icons/hi2";
 import {
+  SiFacebook,
   SiWhatsapp,
   SiMessenger,
-  SiTiktok,
   SiInstagram,
-  SiTelegram,
 } from "react-icons/si";
 
 export type ChannelId =
   | "whatsapp"
+  | "facebook"
   | "messenger"
-  | "webchat"
-  | "tiktok"
   | "instagram"
-  | "telegram";
+  | "instagram-inbox";
 
 interface ChannelDef {
   id: ChannelId;
@@ -32,19 +30,14 @@ const CHANNELS: ChannelDef[] = [
     icon: <SiWhatsapp className="text-xl text-green-500 shrink-0" />,
   },
   {
+    id: "facebook",
+    label: "Facebook",
+    icon: <SiFacebook className="text-xl text-blue-600 shrink-0" />,
+  },
+  {
     id: "messenger",
     label: "Messenger",
     icon: <SiMessenger className="text-xl text-blue-500 shrink-0" />,
-  },
-  {
-    id: "webchat",
-    label: "Web Chat",
-    icon: <FiGlobe className="text-xl text-indigo-500 shrink-0" />,
-  },
-  {
-    id: "tiktok",
-    label: "TikTok",
-    icon: <SiTiktok className="text-xl text-gray-800 shrink-0" />,
   },
   {
     id: "instagram",
@@ -52,9 +45,19 @@ const CHANNELS: ChannelDef[] = [
     icon: <SiInstagram className="text-xl text-pink-500 shrink-0" />,
   },
   {
-    id: "telegram",
-    label: "Telegram",
-    icon: <SiTelegram className="text-xl text-sky-400 shrink-0" />,
+    id: "instagram-inbox",
+    label: "Instagram Inbox",
+    icon: (
+      <span className="relative inline-flex h-5 w-5 shrink-0 items-center justify-center">
+        <SiInstagram className="text-xl text-pink-500" aria-hidden />
+        <span
+          className="absolute -bottom-0.5 -right-1 flex h-3.5 w-3.5 items-center justify-center rounded-full bg-white ring-1 ring-gray-200"
+          aria-hidden
+        >
+          <HiOutlineChatBubbleLeftRight className="h-2.5 w-2.5 text-pink-600" />
+        </span>
+      </span>
+    ),
   },
 ];
 

@@ -74,6 +74,8 @@ interface Props {
   ticketList?: CustomerChatTicket[];
   ticketsLoading?: boolean;
   onTicketDrawerOpen?: () => void;
+  /** Channel-specific `createTicketReviewByChatId` URL (Messenger vs WhatsApp). */
+  createTicketReviewUrl?: string;
 }
 
 /** Prefer `messageHeader` + local time from `createdAt`; fallback to `createdAt` for the pill. */
@@ -105,6 +107,7 @@ export function ChatWindowSection({
   ticketList,
   ticketsLoading = false,
   onTicketDrawerOpen,
+  createTicketReviewUrl,
 }: Props) {
   const [draft, setDraft] = useState("");
   const [transferMenuOpen, setTransferMenuOpen] = useState(false);
@@ -443,6 +446,7 @@ export function ChatWindowSection({
         ticketList={ticketList ?? activeChat.ticketList ?? []}
         ticketsLoading={ticketsLoading}
         onTicketDrawerOpen={onTicketDrawerOpen}
+        createTicketReviewUrl={createTicketReviewUrl}
       />
 
       {/* Messages */}

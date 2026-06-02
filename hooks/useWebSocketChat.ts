@@ -33,6 +33,14 @@ import type {
   User,
 } from "../lib/chat/types";
 import { ChatWebSocketClient } from "../lib/websocket/client";
+import {
+  createSocialChannelApiUrls,
+  type SocialChannelApiUrls,
+} from "@/lib/agent/socialChannelApiUrls";
+import {
+  WHATSAPP_SOCIAL_CHANNEL_CONFIG,
+  type SocialChannelChatConfig,
+} from "@/lib/agent/socialChannelConfig";
 import { toast } from "sonner";
 
 /**
@@ -51,66 +59,6 @@ const WS_FILE_WAIT_ACK_AFTER_METADATA =
  */
 const WS_FILE_WAIT_ACK_AFTER_EACH_CHUNK = false;
 
-const DEFAULT_HTTP_API_ORIGIN = "http://10.0.10.53:8080";
-const DEFAULT_QUEUE_CHATS_PATH =
-  "/SES/app/SocialMedia/whatsapp/getQueueNAssignedChats";
-const DEFAULT_LOAD_CONVERSATION_PATH =
-  "/SES/app/SocialMedia/whatsapp/loadConversationById";
-const DEFAULT_ASSIGN_CHAT_PATH = "/SES/app/SocialMedia/whatsapp/assignChat";
-const DEFAULT_TRANSFER_CHAT_PATH = "/SES/app/SocialMedia/whatsapp/transferChat";
-const DEFAULT_CLOSE_CHAT_PATH = "/SES/app/SocialMedia/whatsapp/closeChat";
-const DEFAULT_TICKET_LIST_BY_CHAT_ID_PATH =
-  "/SES/app/SocialMedia/whatsapp/getTicketListByChatId";
-const DEFAULT_AUTO_ASSIGNMENT_STATUS_PATH =
-  "/SES/app/SocialMedia/whatsapp/getAutoAssignmentStatus";
-const DEFAULT_CHAT_WS_HOST = "10.0.10.53:8080";
-const DEFAULT_CHAT_WS_PATH = "/SES/WebLiveChat";
-
-function getDefaultApiOrigin(): string {
-  if (typeof window === "undefined") return DEFAULT_HTTP_API_ORIGIN;
-  return window.location.protocol === "https:"
-    ? window.location.origin
-    : DEFAULT_HTTP_API_ORIGIN;
-}
-
-function getChatWebSocketUrl(): string {
-  const fromEnv =
-    typeof process !== "undefined" && process.env.NEXT_PUBLIC_CHAT_WS_URL
-      ? process.env.NEXT_PUBLIC_CHAT_WS_URL
-      : undefined;
-  if (fromEnv) return fromEnv;
-  if (typeof window === "undefined") {
-    return `ws://${DEFAULT_CHAT_WS_HOST}${DEFAULT_CHAT_WS_PATH}`;
-  }
-  const isHttps = window.location.protocol === "https:";
-  if (isHttps) {
-    const domain = window.location.hostname;
-    return `wss://${domain}${DEFAULT_CHAT_WS_PATH}`;
-  }
-  return `ws://${DEFAULT_CHAT_WS_HOST}${DEFAULT_CHAT_WS_PATH}`;
-}
-
-function getLoadConversationUrl(): string {
-  const fromEnv =
-    typeof process !== "undefined" &&
-    process.env.NEXT_PUBLIC_LOAD_CONVERSATION_URL
-      ? process.env.NEXT_PUBLIC_LOAD_CONVERSATION_URL
-      : undefined;
-  return (
-    fromEnv ?? `${getDefaultApiOrigin()}${DEFAULT_LOAD_CONVERSATION_PATH}`
-  ).replace(/\/$/, "");
-}
-
-function getQueueChatsUrl(): string {
-  const fromEnv =
-    typeof process !== "undefined" && process.env.NEXT_PUBLIC_QUEUE_CHATS_URL
-      ? process.env.NEXT_PUBLIC_QUEUE_CHATS_URL
-      : undefined;
-  return (
-    fromEnv ?? `${getDefaultApiOrigin()}${DEFAULT_QUEUE_CHATS_PATH}`
-  ).replace(/\/$/, "");
-}
-
 function shouldSendUserIdInParams(): boolean {
   return (
     typeof process !== "undefined" && process.env.NODE_ENV === "development"
@@ -119,61 +67,6 @@ function shouldSendUserIdInParams(): boolean {
 
 function getApiFetchCredentials(): RequestCredentials {
   return shouldSendUserIdInParams() ? "omit" : "include";
-}
-
-function getAssignChatUrl(): string {
-  const fromEnv =
-    typeof process !== "undefined" && process.env.NEXT_PUBLIC_ASSIGN_CHAT_URL
-      ? process.env.NEXT_PUBLIC_ASSIGN_CHAT_URL
-      : undefined;
-  return (fromEnv ?? `${getDefaultApiOrigin()}${DEFAULT_ASSIGN_CHAT_PATH}`).replace(
-    /\/$/,
-    "",
-  );
-}
-
-function getTransferChatUrl(): string {
-  const fromEnv =
-    typeof process !== "undefined" &&
-    process.env.NEXT_PUBLIC_TRANSFER_CHAT_URL
-      ? process.env.NEXT_PUBLIC_TRANSFER_CHAT_URL
-      : undefined;
-  return (
-    fromEnv ?? `${getDefaultApiOrigin()}${DEFAULT_TRANSFER_CHAT_PATH}`
-  ).replace(/\/$/, "");
-}
-
-function getCloseChatUrl(): string {
-  const fromEnv =
-    typeof process !== "undefined" && process.env.NEXT_PUBLIC_CLOSE_CHAT_URL
-      ? process.env.NEXT_PUBLIC_CLOSE_CHAT_URL
-      : undefined;
-  return (
-    fromEnv ?? `${getDefaultApiOrigin()}${DEFAULT_CLOSE_CHAT_PATH}`
-  ).replace(/\/$/, "");
-}
-
-function getTicketListByChatIdUrl(): string {
-  const fromEnv =
-    typeof process !== "undefined" &&
-    process.env.NEXT_PUBLIC_GET_TICKET_LIST_BY_CHAT_ID_URL?.trim()
-      ? process.env.NEXT_PUBLIC_GET_TICKET_LIST_BY_CHAT_ID_URL.trim()
-      : undefined;
-  return (
-    fromEnv ??
-    `${getDefaultApiOrigin()}${DEFAULT_TICKET_LIST_BY_CHAT_ID_PATH}`
-  ).replace(/\/$/, "");
-}
-
-function getAutoAssignmentStatusUrl(): string {
-  const fromEnv =
-    typeof process !== "undefined" &&
-    process.env.NEXT_PUBLIC_AUTO_ASSIGNMENT_STATUS_URL?.trim()
-      ? process.env.NEXT_PUBLIC_AUTO_ASSIGNMENT_STATUS_URL.trim()
-      : undefined;
-  return (
-    fromEnv ?? `${getDefaultApiOrigin()}${DEFAULT_AUTO_ASSIGNMENT_STATUS_PATH}`
-  ).replace(/\/$/, "");
 }
 
 function parseLooseBoolean(raw: unknown): boolean | null {
@@ -214,8 +107,11 @@ function extractAutoAssignmentEnabled(json: unknown): boolean {
   return false;
 }
 
-async function fetchAutoAssignmentStatus(userId: string): Promise<boolean> {
-  const url = new URL(getAutoAssignmentStatusUrl());
+async function fetchAutoAssignmentStatus(
+  urls: SocialChannelApiUrls,
+  userId: string,
+): Promise<boolean> {
+  const url = new URL(urls.autoAssignmentStatus);
   url.searchParams.set("Userid", userId);
   const res = await fetch(url.toString(), {
     method: "POST",
@@ -801,10 +697,11 @@ function extractTicketList(json: unknown): CustomerChatTicket[] {
 }
 
 async function fetchTicketListByChatId(
+  urls: SocialChannelApiUrls,
   chatIndex: string | number,
   agentUserId: string,
 ): Promise<CustomerChatTicket[]> {
-  const url = new URL(getTicketListByChatIdUrl());
+  const url = new URL(urls.ticketListByChatId);
   url.searchParams.set("Userid", agentUserId);
   const res = await fetch(url.toString(), {
     method: "POST",
@@ -831,6 +728,7 @@ function parseOptionalIsChatActive(raw: unknown): boolean | undefined {
 }
 
 async function fetchConversationByChatIndex(
+  urls: SocialChannelApiUrls,
   chatIndex: string | number,
   chatId: string,
   agentUserId: string,
@@ -841,7 +739,7 @@ async function fetchConversationByChatIndex(
   messages: Message[];
   ticketList: CustomerChatTicket[];
 }> {
-  const url = new URL(getLoadConversationUrl());
+  const url = new URL(urls.loadConversation);
   url.searchParams.set("Userid", agentUserId);
 
   const res = await fetch(url.toString(), {
@@ -895,7 +793,10 @@ function sortMessagesChronologically(messages: Message[]): Message[] {
   });
 }
 
-async function fetchQueueAndAssignedChats(agent: User): Promise<{
+async function fetchQueueAndAssignedChats(
+  urls: SocialChannelApiUrls,
+  agent: User,
+): Promise<{
   chats: Chat[];
   initializer: BackendWsInitializer | null;
   domainIndex: number | null;
@@ -907,7 +808,7 @@ async function fetchQueueAndAssignedChats(agent: User): Promise<{
   ticketSmsTemplates: { id: string; name: string }[];
   awayReasons: AwayReasonOption[];
 }> {
-  const url = new URL(getQueueChatsUrl());
+  const url = new URL(urls.queueChats);
   if (shouldSendUserIdInParams()) {
     url.searchParams.set("Userid", agent.id);
   }
@@ -1000,12 +901,13 @@ function parseTransferChatStatus(json: unknown): number | null {
 }
 
 async function assignChatToAgent(
+  urls: SocialChannelApiUrls,
   chatIndex: string | number,
   domainIndex: number,
   chatFrom: number,
   userId: string,
 ): Promise<number | null> {
-  const url = new URL(getAssignChatUrl());
+  const url = new URL(urls.assignChat);
   if (shouldSendUserIdInParams()) {
     url.searchParams.set("Userid", userId);
   }
@@ -1029,7 +931,8 @@ async function assignChatToAgent(
  * `agentIndex`: `0` when returning to queue; otherwise target agent id from `userList`.
  * `isTransferredToAgent`: `false` for queue, `true` for agent.
  */
-async function transferWhatsAppChat(
+async function transferChannelChat(
+  urls: SocialChannelApiUrls,
   chatIndex: string | number,
   domainIndex: number,
   chatFrom: number,
@@ -1039,7 +942,7 @@ async function transferWhatsAppChat(
 ): Promise<number | null> {
   const ci = chatIndexToApiInt(chatIndex);
   if (ci === null) return null;
-  const url = new URL(getTransferChatUrl());
+  const url = new URL(urls.transferChat);
   if (shouldSendUserIdInParams()) {
     url.searchParams.set("Userid", userId);
   }
@@ -1061,13 +964,14 @@ async function transferWhatsAppChat(
   return parseTransferChatStatus(json);
 }
 
-async function closeWhatsAppChat(
+async function closeChannelChat(
+  urls: SocialChannelApiUrls,
   chatIndex: string | number,
   domainIndex: number,
   chatFrom: number,
   userId: string,
 ): Promise<number | null> {
-  const url = new URL(getCloseChatUrl());
+  const url = new URL(urls.closeChat);
   if (shouldSendUserIdInParams()) {
     url.searchParams.set("Userid", userId);
   }
@@ -1398,7 +1302,10 @@ async function sendFileChunksViaWebSocket(
   }
 }
 
-export function useWebSocketChat(currentUser: User | null) {
+export function useWebSocketChat(
+  currentUser: User | null,
+  channelConfig: SocialChannelChatConfig = WHATSAPP_SOCIAL_CHANNEL_CONFIG,
+) {
   const [state, setState] = useState<State>(initialState);
   const stateRef = useRef(state);
   stateRef.current = state;
@@ -1406,10 +1313,20 @@ export function useWebSocketChat(currentUser: User | null) {
   /** Avoid overlapping `getTicketListByChatId` calls (e.g. Strict Mode or rapid toggles). */
   const ticketListFetchInFlightRef = useRef(false);
 
-  const client = useMemo(
-    () => new ChatWebSocketClient(getChatWebSocketUrl()),
-    [],
+  const apiUrls = useMemo(
+    () => createSocialChannelApiUrls(channelConfig),
+    [channelConfig],
   );
+
+  const client = useMemo(
+    () => new ChatWebSocketClient(apiUrls.webSocket),
+    [apiUrls.webSocket],
+  );
+
+  useEffect(() => {
+    setState(initialState);
+    ticketListFetchInFlightRef.current = false;
+  }, [channelConfig.key]);
 
   const refreshAgentChatsFromApi = useCallback(
     (opts?: {
@@ -1420,8 +1337,8 @@ export function useWebSocketChat(currentUser: User | null) {
       const agentId = currentUser?.id;
       if (!agentId || currentUser.role !== "agent") return;
       Promise.allSettled([
-        fetchQueueAndAssignedChats(currentUser),
-        fetchAutoAssignmentStatus(currentUser.id),
+        fetchQueueAndAssignedChats(apiUrls, currentUser),
+        fetchAutoAssignmentStatus(apiUrls, currentUser.id),
       ])
         .then(([queueOutcome, autoOutcome]) => {
           // Auto-assignment status drives sidebar layout independently of the
@@ -1513,7 +1430,7 @@ export function useWebSocketChat(currentUser: User | null) {
           );
         });
     },
-    [client, currentUser],
+    [apiUrls, client, currentUser],
   );
 
   useEffect(() => {
@@ -1985,6 +1902,7 @@ export function useWebSocketChat(currentUser: User | null) {
 
     try {
       const status = await assignChatToAgent(
+        apiUrls,
         chat.whatsappChatIndex,
         state.domainIndex,
         state.chatFrom,
@@ -2222,7 +2140,8 @@ export function useWebSocketChat(currentUser: User | null) {
 
     void (async () => {
       try {
-        const status = await transferWhatsAppChat(
+        const status = await transferChannelChat(
+          apiUrls,
           chatIndex,
           state.domainIndex!,
           state.chatFrom!,
@@ -2284,7 +2203,8 @@ export function useWebSocketChat(currentUser: User | null) {
 
     void (async () => {
       try {
-        const status = await transferWhatsAppChat(
+        const status = await transferChannelChat(
+          apiUrls,
           chatIndex,
           state.domainIndex!,
           state.chatFrom!,
@@ -2341,7 +2261,8 @@ export function useWebSocketChat(currentUser: User | null) {
       }
       void (async () => {
         try {
-          const status = await closeWhatsAppChat(
+          const status = await closeChannelChat(
+            apiUrls,
             chatIndex,
             domainIndex,
             chatFrom,
@@ -2400,6 +2321,7 @@ export function useWebSocketChat(currentUser: User | null) {
       try {
         const { sessionStatus, isChatActive, messages, ticketList } =
           await fetchConversationByChatIndex(
+            apiUrls,
             chatIndex,
             chatId,
             currentUser.id,
@@ -2480,6 +2402,7 @@ export function useWebSocketChat(currentUser: User | null) {
     setState((prev) => ({ ...prev, ticketListLoading: true }));
     try {
       const ticketList = await fetchTicketListByChatId(
+        apiUrls,
         chatIndex,
         currentUser.id,
       );
@@ -2501,9 +2424,11 @@ export function useWebSocketChat(currentUser: User | null) {
     } finally {
       ticketListFetchInFlightRef.current = false;
     }
-  }, [currentUser]);
+  }, [apiUrls, currentUser]);
 
   return {
+    channelKey: channelConfig.key,
+    createTicketReviewUrl: apiUrls.createTicketReviewByChatId,
     chats: state.chats,
     messages: state.messages,
     queue,

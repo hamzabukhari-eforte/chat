@@ -51,8 +51,9 @@ export type CreateTicketReviewByChatIdBody = {
 export async function postCreateTicketReviewByChatId(
   agentUserId: string,
   body: CreateTicketReviewByChatIdBody,
+  options?: { apiUrl?: string },
 ): Promise<void> {
-  const url = new URL(getCreateTicketReviewByChatIdUrl());
+  const url = new URL(options?.apiUrl ?? getCreateTicketReviewByChatIdUrl());
   url.searchParams.set("Userid", agentUserId);
   const res = await fetch(url.toString(), {
     method: "POST",

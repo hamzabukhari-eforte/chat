@@ -10,9 +10,13 @@ import {
   type CSSProperties,
 } from "react";
 import { AnimatePresence, motion } from "framer-motion";
-import { useWebSocketChat } from "../../hooks/useWebSocketChat";
 import {
-  // ChannelDrawerSection,
+  isLiveAgentInboxChannel,
+  useAgentChannelChat,
+} from "../../hooks/useAgentChannelChat";
+import { useDashboardChannel } from "../../hooks/useDashboardChannel";
+import {
+  ChannelDrawerSection,
   type ChannelId,
 } from "./ChannelDrawerSection";
 import { AgentAppHeader } from "./AgentAppHeader";
@@ -23,28 +27,20 @@ import { AGENT_APP_HEADER_HEIGHT_VAR } from "@/lib/layout/agentAppLayout";
 import { cn } from "@/lib/utils";
 
 const CHANNEL_PLACEHOLDER: Record<
-  Exclude<ChannelId, "webchat">,
+  Exclude<ChannelId, "whatsapp" | "messenger">,
   { title: string; subtitle: string }
 > = {
-  whatsapp: {
-    title: "WhatsApp",
-    subtitle: "Inbox for this channel is not connected yet. Use Web Chat for live conversations.",
-  },
-  messenger: {
-    title: "Messenger",
-    subtitle: "Inbox for this channel is not connected yet. Use Web Chat for live conversations.",
-  },
-  tiktok: {
-    title: "TikTok",
-    subtitle: "Inbox for this channel is not connected yet. Use Web Chat for live conversations.",
+  facebook: {
+    title: "Facebook",
+    subtitle: "Facebook inbox is not connected yet. Switch to WhatsApp for live conversations.",
   },
   instagram: {
     title: "Instagram",
-    subtitle: "Inbox for this channel is not connected yet. Use Web Chat for live conversations.",
+    subtitle: "Instagram inbox is not connected yet. Switch to WhatsApp for live conversations.",
   },
-  telegram: {
-    title: "Telegram",
-    subtitle: "Inbox for this channel is not connected yet. Use Web Chat for live conversations.",
+  "instagram-inbox": {
+    title: "Instagram Inbox",
+    subtitle: "Instagram inbox is not connected yet. Switch to WhatsApp for live conversations.",
   },
 };
 
@@ -72,14 +68,32 @@ function getBelowXlSnapshot(): boolean {
 }
 
 export function AgentDashboard() {
+  const [activeChannel, onChannelChange] = useDashboardChannel();
+
+  return (
+    <AgentDashboardContent
+      activeChannel={activeChannel}
+      onChannelChange={onChannelChange}
+    />
+  );
+}
+
+interface AgentDashboardContentProps {
+  activeChannel: ChannelId;
+  onChannelChange?: (channel: ChannelId) => void;
+}
+
+function AgentDashboardContent({
+  activeChannel,
+  onChannelChange,
+}: AgentDashboardContentProps) {
   const [showCustomerInfo, setShowCustomerInfo] = useState(false);
   /** Below `xl`, inbox (queue / my chats) and chat are separate full-height panes. */
   const [showMobileInbox, setShowMobileInbox] = useState(true);
-  const [activeChannel, setActiveChannel] = useState<ChannelId>("webchat");
   const agentHeaderMeasureRef = useRef<HTMLDivElement>(null);
   const [agentHeaderHeightPx, setAgentHeaderHeightPx] = useState(56);
 
-  const chat = useWebSocketChat(STATIC_AGENT);
+  const chat = useAgentChannelChat(activeChannel, STATIC_AGENT);
 
   const belowXl = useSyncExternalStore(
     subscribeBelowXl,
@@ -174,12 +188,12 @@ export function AgentDashboard() {
         />
       </div>
       <div className="flex min-h-0 flex-1 flex-col overflow-hidden xl:flex-row">
-        {/* <ChannelDrawerSection
-        activeChannel={activeChannel}
-        onChannelChange={setActiveChannel}
-      /> */}
+        <ChannelDrawerSection
+          activeChannel={activeChannel}
+          onChannelChange={onChannelChange ?? (() => {})}
+        />
 
-        {activeChannel === "webchat" ? (
+        {isLiveAgentInboxChannel(activeChannel) ? (
         <>
           <div
             className={cn(
@@ -231,6 +245,7 @@ export function AgentDashboard() {
               ticketList={chat.activeChat?.ticketList}
               ticketsLoading={chat.ticketListLoading}
               onTicketDrawerOpen={chat.refreshActiveChatTickets}
+              createTicketReviewUrl={chat.createTicketReviewUrl}
             />
           </div>
           <AnimatePresence>
@@ -293,13 +308,15 @@ export function AgentDashboard() {
           <p className="mt-2 text-sm text-gray-500 max-w-md">
             {CHANNEL_PLACEHOLDER[activeChannel].subtitle}
           </p>
-          <button
-            type="button"
-            onClick={() => setActiveChannel("webchat")}
-            className="mt-6 px-4 py-2 rounded-lg bg-brand-600 text-white  text-sm font-medium hover:bg-brand-700 transition-colors cursor-pointer"
-          >
-            Open Web Chat
-          </button>
+          {onChannelChange ? (
+            <button
+              type="button"
+              onClick={() => onChannelChange("whatsapp")}
+              className="mt-6 px-4 py-2 rounded-lg bg-brand-600 text-white text-sm font-medium hover:bg-brand-700 transition-colors cursor-pointer"
+            >
+              Open WhatsApp
+            </button>
+          ) : null}
         </div>
         )}
       </div>

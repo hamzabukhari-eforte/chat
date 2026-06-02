@@ -56,6 +56,7 @@ type Props = {
   ticketsLoading?: boolean;
   /** Called when the ticket drawer opens so the parent can refresh the list. */
   onTicketDrawerOpen?: () => void;
+  createTicketReviewUrl?: string;
 };
 
 function emptyTicketFields() {
@@ -958,6 +959,7 @@ export function TicketDrawerSection({
   ticketList = [],
   ticketsLoading = false,
   onTicketDrawerOpen,
+  createTicketReviewUrl,
 }: Props) {
   const titleId = useId();
   const descriptionId = useId();
@@ -1035,6 +1037,7 @@ export function TicketDrawerSection({
                 cli={customerPhone}
                 tickets={ticketList}
                 loading={ticketsLoading}
+                createTicketReviewUrl={createTicketReviewUrl}
               />
             ) : (
               <TicketDrawerFormBody
