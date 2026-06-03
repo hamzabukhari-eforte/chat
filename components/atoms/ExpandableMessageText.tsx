@@ -1,6 +1,7 @@
 "use client";
 
 import { useEffect, useLayoutEffect, useRef, useState } from "react";
+import { linkifyMessageText } from "@/lib/chat/linkifyMessageText";
 
 export type ExpandableMessageTextTone = "inverse" | "default";
 
@@ -158,12 +159,14 @@ export function ExpandableMessageText({
       ? " focus-visible:ring-white/50"
       : " focus-visible:ring-brand-500/40");
 
+  const renderBody = (body: string) => linkifyMessageText(body, tone);
+
   return (
     <div ref={containerRef} className="min-w-0">
       {!expanded ? (
         needsTruncate ? (
           <p className={bodyClass}>
-            {truncatedBody}
+            {renderBody(truncatedBody)}
             {"… "}
             <span
               role="button"
@@ -184,11 +187,11 @@ export function ExpandableMessageText({
             </span>
           </p>
         ) : (
-          <p className={bodyClass}>{text}</p>
+          <p className={bodyClass}>{renderBody(text)}</p>
         )
       ) : (
         <>
-          <p className={bodyClass}>{text}</p>
+          <p className={bodyClass}>{renderBody(text)}</p>
           {needsTruncate ? (
             <button
               type="button"
