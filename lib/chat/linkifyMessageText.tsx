@@ -1,4 +1,4 @@
-import type { ReactNode } from "react";
+import { Fragment, type ReactNode } from "react";
 
 /** `https:` through the next whitespace (WhatsApp / Messenger message bodies). */
 const HTTPS_URL_PATTERN = /https:[^\s]+/g;
@@ -23,17 +23,20 @@ export function linkifyMessageText(
 
   const parts: ReactNode[] = [];
   let lastIndex = 0;
-  let linkIndex = 0;
+  let segmentIndex = 0;
 
   for (const match of text.matchAll(HTTPS_URL_PATTERN)) {
     const start = match.index ?? 0;
     if (start > lastIndex) {
-      parts.push(text.slice(lastIndex, start));
+      const chunk = text.slice(lastIndex, start);
+      parts.push(
+        <Fragment key={`linkify-text-${segmentIndex++}`}>{chunk}</Fragment>,
+      );
     }
     const url = match[0];
     parts.push(
       <a
-        key={`msg-link-${linkIndex++}`}
+        key={`linkify-url-${segmentIndex++}`}
         href={url}
         target="_blank"
         rel="noopener noreferrer"
@@ -47,7 +50,11 @@ export function linkifyMessageText(
   }
 
   if (lastIndex < text.length) {
-    parts.push(text.slice(lastIndex));
+    parts.push(
+      <Fragment key={`linkify-text-${segmentIndex++}`}>
+        {text.slice(lastIndex)}
+      </Fragment>,
+    );
   }
 
   return parts.length === 1 ? parts[0] : parts;

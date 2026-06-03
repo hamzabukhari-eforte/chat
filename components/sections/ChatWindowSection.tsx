@@ -13,7 +13,7 @@ import {
   voiceClipFileNameForBlob,
 } from "../../lib/chat/fileAttachment";
 import { HiOutlineChatBubbleLeftRight } from "react-icons/hi2";
-import { stableMessageListKey } from "../../lib/chat/messageKey";
+import { stableMessageListKey, messageListKey } from "../../lib/chat/messageKey";
 import {
   formatChatDateSeparatorLabel,
   formatMessageTimeLabelFromMessage,
@@ -472,7 +472,7 @@ export function ChatWindowSection({
 
           const datePillLabel = dateSeparatorLabelFromMessage(message);
           return (
-            <div key={stableMessageListKey(message)}>
+            <div key={messageListKey(message, index)}>
               {shouldShowDate && datePillLabel && (
                 <div className="flex items-center justify-center my-4">
                   <span className="px-3 py-1 rounded-full bg-gray-100 text-[11px] text-gray-500 font-medium">

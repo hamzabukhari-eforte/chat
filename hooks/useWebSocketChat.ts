@@ -1046,6 +1046,66 @@ function applyPendingSeenToMessage(
   return { message: { ...m, chatSeenStatus: st }, pending: rest };
 }
 
+type AgentChannelContext = {
+  domainIndex: number | null;
+  chatFrom: number | null;
+};
+
+function parseOptionalChannelNumber(raw: unknown): number | undefined {
+  if (raw === undefined || raw === null || String(raw).trim() === "") {
+    return undefined;
+  }
+  const n = Number(raw);
+  return Number.isFinite(n) ? Math.trunc(n) : undefined;
+}
+
+/** Ignore WS / queue rows for another SES channel when `chatFrom` / `domainIndex` are set. */
+function wsPayloadMatchesAgentChannel(
+  ctx: AgentChannelContext,
+  fields: { domainIndex?: number; chatFrom?: number },
+): boolean {
+  if (
+    fields.domainIndex !== undefined &&
+    ctx.domainIndex !== null &&
+    ctx.domainIndex !== fields.domainIndex
+  ) {
+    return false;
+  }
+  if (
+    fields.chatFrom !== undefined &&
+    ctx.chatFrom !== null &&
+    ctx.chatFrom !== fields.chatFrom
+  ) {
+    return false;
+  }
+  return true;
+}
+
+function wsQueueRowMatchesAgentChannel(
+  ctx: AgentChannelContext,
+  data: Record<string, unknown>,
+): boolean {
+  return wsPayloadMatchesAgentChannel(ctx, {
+    domainIndex: parseOptionalChannelNumber(
+      data.domainIndex ?? data.DomainIndex,
+    ),
+    chatFrom: parseOptionalChannelNumber(
+      data.chatFrom ?? data.ChatFrom ?? data.chat_from,
+    ),
+  });
+}
+
+function chatRowExistsInState(chats: Chat[], chatId: string): boolean {
+  const idStr = chatId.trim();
+  if (!idStr) return false;
+  return chats.some(
+    (c) =>
+      c.id === idStr ||
+      (c.whatsappChatIndex !== undefined &&
+        String(c.whatsappChatIndex) === idStr),
+  );
+}
+
 function mergeChatsById(prev: Chat[], incoming: Chat[]): Chat[] {
   const map = new Map<string, Chat>();
   prev.forEach((c) => map.set(c.id, c));
@@ -1312,6 +1372,8 @@ export function useWebSocketChat(
   const transferToastDedupRef = useRef<Record<string, number>>({});
   /** Avoid overlapping `getTicketListByChatId` calls (e.g. Strict Mode or rapid toggles). */
   const ticketListFetchInFlightRef = useRef(false);
+  /** Bumped on channel change so stale cross-channel queue fetches are ignored. */
+  const queueFetchGenerationRef = useRef(0);
 
   const apiUrls = useMemo(
     () => createSocialChannelApiUrls(channelConfig),
@@ -1326,6 +1388,7 @@ export function useWebSocketChat(
   useEffect(() => {
     setState(initialState);
     ticketListFetchInFlightRef.current = false;
+    queueFetchGenerationRef.current += 1;
   }, [channelConfig.key]);
 
   const refreshAgentChatsFromApi = useCallback(
@@ -1336,11 +1399,13 @@ export function useWebSocketChat(
     }) => {
       const agentId = currentUser?.id;
       if (!agentId || currentUser.role !== "agent") return;
+      const fetchGeneration = queueFetchGenerationRef.current;
       Promise.allSettled([
         fetchQueueAndAssignedChats(apiUrls, currentUser),
         fetchAutoAssignmentStatus(apiUrls, currentUser.id),
       ])
         .then(([queueOutcome, autoOutcome]) => {
+          if (fetchGeneration !== queueFetchGenerationRef.current) return;
           // Auto-assignment status drives sidebar layout independently of the
           // queue API: if it succeeded, always honor its value even when the
           // queue API failed, so showQueue isn't stuck on its initial default.
@@ -1354,7 +1419,7 @@ export function useWebSocketChat(
             const result = queueOutcome.value;
             client.setInitializer(result.initializer);
             setState((prev) => {
-              const nextChats = mergeChatsById(prev.chats, result.chats);
+              const nextChats = result.chats;
               const notifyAssignedChatId = opts?.notifyAssignedChatId;
               if (notifyAssignedChatId && opts?.source === "chat-transfer") {
                 const wasMyChat = prev.chats.some(
@@ -1425,6 +1490,7 @@ export function useWebSocketChat(
           }
         })
         .finally(() => {
+          if (fetchGeneration !== queueFetchGenerationRef.current) return;
           setState((prev) =>
             prev.isInitialLoading ? { ...prev, isInitialLoading: false } : prev,
           );
@@ -1442,13 +1508,26 @@ export function useWebSocketChat(
     client.connect();
     const unsubscribe = client.subscribe((event) => {
       if (event.type === "chat-transfer") {
-        refreshAgentChatsFromApi({
-          notifyAssignedChatId: event.payload.chatId,
-          notifyAssignedUserName: event.payload.userName,
-          source: "chat-transfer",
-        });
+        const ctx = stateRef.current;
+        if (
+          wsPayloadMatchesAgentChannel(ctx, {
+            domainIndex: event.payload.domainIndex,
+            chatFrom: event.payload.chatFrom,
+          })
+        ) {
+          refreshAgentChatsFromApi({
+            notifyAssignedChatId: event.payload.chatId,
+            notifyAssignedUserName: event.payload.userName,
+            source: "chat-transfer",
+          });
+        }
       }
       setState((prev) => {
+        const channelCtx: AgentChannelContext = {
+          domainIndex: prev.domainIndex,
+          chatFrom: prev.chatFrom,
+        };
+
         switch (event.type) {
           case "chat-queued": {
             const isOwnChat =
@@ -1504,6 +1583,9 @@ export function useWebSocketChat(
           }
           case "message": {
             const incoming = event.payload.message;
+            if (!chatRowExistsInState(prev.chats, incoming.chatId)) {
+              return prev;
+            }
             /**
              * Match optimistic rows to server echo even when the server omits
              * `attachments` (common after chunked upload): normalize captions with
@@ -1631,6 +1713,9 @@ export function useWebSocketChat(
             };
           }
           case "new-chat-in-queue": {
+            if (!wsQueueRowMatchesAgentChannel(channelCtx, event.payload.data)) {
+              return prev;
+            }
             const incoming = mapNewChatInQueueDataToChat(event.payload.data);
             if (!incoming) return prev;
             const existing = prev.chats.find((c) => c.id === incoming.id);
@@ -1698,16 +1783,10 @@ export function useWebSocketChat(
             if (!idStr) return prev;
 
             if (
-              domainIndex !== undefined &&
-              prev.domainIndex !== null &&
-              prev.domainIndex !== domainIndex
-            ) {
-              return prev;
-            }
-            if (
-              chatFrom !== undefined &&
-              prev.chatFrom !== null &&
-              prev.chatFrom !== chatFrom
+              !wsPayloadMatchesAgentChannel(channelCtx, {
+                domainIndex,
+                chatFrom,
+              })
             ) {
               return prev;
             }

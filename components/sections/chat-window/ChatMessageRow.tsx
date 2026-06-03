@@ -4,7 +4,6 @@ import { AvatarWithInitials } from "@/components/atoms/AvatarWithInitials";
 import { ExpandableMessageText } from "@/components/atoms/ExpandableMessageText";
 import { MessageSeenTicks } from "@/components/atoms/MessageSeenTicks";
 import { formatMessageTimeLabelFromMessage } from "@/lib/chat/sesMessageTime";
-import { stableMessageListKey } from "@/lib/chat/messageKey";
 import type { Attachment, Message } from "@/lib/chat/types";
 import { ChatMessageAttachments } from "./ChatMessageAttachments";
 
@@ -33,7 +32,7 @@ export function ChatMessageRow({
 
   if (isAgent) {
     return (
-      <div key={stableMessageListKey(message)} className="flex gap-3 justify-end min-w-0">
+      <div className="flex gap-3 justify-end min-w-0">
         <div className="flex min-w-0 flex-1 flex-col items-end">
           {message.attachments && message.attachments.length > 0 && (
             <ChatMessageAttachments
@@ -64,7 +63,7 @@ export function ChatMessageRow({
   }
 
   return (
-    <div key={stableMessageListKey(message)} className="flex min-w-0 gap-3">
+    <div className="flex min-w-0 gap-3">
       <AvatarWithInitials
         name={customerName}
         src={customerAvatar}
