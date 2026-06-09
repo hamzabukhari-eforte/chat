@@ -11,10 +11,14 @@ import { useWebSocketChat } from "./useWebSocketChat";
 export function isLiveAgentInboxChannel(
   channel: ChannelId,
 ): channel is SocialChannelKey {
-  return channel === "whatsapp" || channel === "messenger";
+  return (
+    channel === "whatsapp" ||
+    channel === "messenger" ||
+    channel === "instagram-inbox"
+  );
 }
 
-/** Agent inbox data layer for WhatsApp or Messenger (same UI, channel-specific APIs / WS). */
+/** Agent inbox data layer (same UI, channel-specific APIs / WS). */
 export function useAgentChannelChat(
   channel: ChannelId,
   currentUser: User | null,

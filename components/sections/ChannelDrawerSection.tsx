@@ -29,21 +29,21 @@ const CHANNELS: ChannelDef[] = [
     label: "WhatsApp",
     icon: <SiWhatsapp className="text-xl text-green-500 shrink-0" />,
   },
-  {
-    id: "facebook",
-    label: "Facebook",
-    icon: <SiFacebook className="text-xl text-blue-600 shrink-0" />,
-  },
+  // {
+  //   id: "facebook",
+  //   label: "Facebook",
+  //   icon: <SiFacebook className="text-xl text-blue-600 shrink-0" />,
+  // },
   {
     id: "messenger",
     label: "Messenger",
     icon: <SiMessenger className="text-xl text-blue-500 shrink-0" />,
   },
-  {
-    id: "instagram",
-    label: "Instagram",
-    icon: <SiInstagram className="text-xl text-pink-500 shrink-0" />,
-  },
+  // {
+  //   id: "instagram",
+  //   label: "Instagram",
+  //   icon: <SiInstagram className="text-xl text-pink-500 shrink-0" />,
+  // },
   {
     id: "instagram-inbox",
     label: "Instagram Inbox",

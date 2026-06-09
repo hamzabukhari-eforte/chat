@@ -3,11 +3,11 @@
  * Backend can override URLs per channel via env vars (see `.env.example`).
  */
 
-export type SocialChannelKey = "whatsapp" | "messenger";
+export type SocialChannelKey = "whatsapp" | "messenger" | "instagram-inbox";
 
 export interface SocialChannelChatConfig {
   key: SocialChannelKey;
-  /** Path segment under `/SES/app/SocialMedia/{segment}/`. */
+  /** Path segment under `/SES/.../SocialMedia/{segment}/` (see `socialMediaPath`). */
   apiSegment: SocialChannelKey;
   /**
    * Optional `process.env` keys for full URL overrides (production / per-gateway).
@@ -26,16 +26,18 @@ export interface SocialChannelChatConfig {
   };
 }
 
+/** Non-WhatsApp live inboxes use `/SES/SocialMedia/...` (no `app/` segment) until backend finalizes paths. */
+const SOCIAL_MEDIA_PATH_WITHOUT_APP = new Set<SocialChannelKey>([
+  "messenger",
+  "instagram-inbox",
+]);
+
 function socialMediaPath(segment: string, endpoint: string): string {
-  if (segment === "messenger") {
+  if (SOCIAL_MEDIA_PATH_WITHOUT_APP.has(segment as SocialChannelKey)) {
     return `/SES/SocialMedia/${segment}/${endpoint}`;
   }
   return `/SES/app/SocialMedia/${segment}/${endpoint}`;
 }
-
-// function socialMediaPath(segment: string, endpoint: string): string {
-//   return `/SES/app/SocialMedia/${segment}/${endpoint}`;
-// }
 
 const WHATSAPP_ENDPOINTS = {
   queueChats: "getQueueNAssignedChats",
@@ -87,12 +89,33 @@ export const MESSENGER_SOCIAL_CHANNEL_CONFIG: SocialChannelChatConfig = buildCon
   },
 );
 
+export const INSTAGRAM_INBOX_SOCIAL_CHANNEL_CONFIG: SocialChannelChatConfig =
+  buildConfig("instagram-inbox", {
+    queueChatsUrl: "NEXT_PUBLIC_INSTAGRAM_INBOX_QUEUE_CHATS_URL",
+    loadConversationUrl: "NEXT_PUBLIC_INSTAGRAM_INBOX_LOAD_CONVERSATION_URL",
+    assignChatUrl: "NEXT_PUBLIC_INSTAGRAM_INBOX_ASSIGN_CHAT_URL",
+    transferChatUrl: "NEXT_PUBLIC_INSTAGRAM_INBOX_TRANSFER_CHAT_URL",
+    closeChatUrl: "NEXT_PUBLIC_INSTAGRAM_INBOX_CLOSE_CHAT_URL",
+    ticketListByChatIdUrl:
+      "NEXT_PUBLIC_INSTAGRAM_INBOX_GET_TICKET_LIST_BY_CHAT_ID_URL",
+    autoAssignmentStatusUrl:
+      "NEXT_PUBLIC_INSTAGRAM_INBOX_AUTO_ASSIGNMENT_STATUS_URL",
+    createTicketReviewByChatIdUrl:
+      "NEXT_PUBLIC_INSTAGRAM_INBOX_CREATE_TICKET_REVIEW_BY_CHAT_ID_URL",
+    chatWsUrl: "NEXT_PUBLIC_INSTAGRAM_INBOX_CHAT_WS_URL",
+  });
+
 export function getSocialChannelConfig(
   key: SocialChannelKey,
 ): SocialChannelChatConfig {
-  return key === "messenger"
-    ? MESSENGER_SOCIAL_CHANNEL_CONFIG
-    : WHATSAPP_SOCIAL_CHANNEL_CONFIG;
+  switch (key) {
+    case "messenger":
+      return MESSENGER_SOCIAL_CHANNEL_CONFIG;
+    case "instagram-inbox":
+      return INSTAGRAM_INBOX_SOCIAL_CHANNEL_CONFIG;
+    default:
+      return WHATSAPP_SOCIAL_CHANNEL_CONFIG;
+  }
 }
 
 export function defaultApiPathForConfig(

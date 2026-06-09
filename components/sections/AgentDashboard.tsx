@@ -27,7 +27,7 @@ import { AGENT_APP_HEADER_HEIGHT_VAR } from "@/lib/layout/agentAppLayout";
 import { cn } from "@/lib/utils";
 
 const CHANNEL_PLACEHOLDER: Record<
-  Exclude<ChannelId, "whatsapp" | "messenger">,
+  Exclude<ChannelId, "whatsapp" | "messenger" | "instagram-inbox">,
   { title: string; subtitle: string }
 > = {
   facebook: {
@@ -36,10 +36,6 @@ const CHANNEL_PLACEHOLDER: Record<
   },
   instagram: {
     title: "Instagram",
-    subtitle: "Instagram inbox is not connected yet. Switch to WhatsApp for live conversations.",
-  },
-  "instagram-inbox": {
-    title: "Instagram Inbox",
     subtitle: "Instagram inbox is not connected yet. Switch to WhatsApp for live conversations.",
   },
 };
