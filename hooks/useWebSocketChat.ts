@@ -125,16 +125,16 @@ async function fetchAutoAssignmentStatus(
 }
 
 interface QueueNAssignedRow {
-  number: string;
-  messageTime: string;
-  country: string | null;
-  city: string | null;
-  profilePic: string;
-  lastMsg: string;
-  userName: string;
-  region: string | null;
+  number?: string;
+  messageTime?: string;
+  country?: string | null;
+  city?: string | null;
+  profilePic?: string;
+  lastMsg?: string;
+  userName?: string;
+  region?: string | null;
   chatIndex: string | number;
-  email: string;
+  email?: string;
   counts?: number;
   isChatActive?: boolean;
   lastAssignedAgent?: string | null;
@@ -347,8 +347,8 @@ interface BackendWsInitializer {
   chatFrom: number;
 }
 
-function parseMessageTime(raw: string): string {
-  const trimmed = raw.trim();
+function parseMessageTime(raw: string | null | undefined): string {
+  const trimmed = String(raw ?? "").trim();
   const direct = new Date(trimmed);
   if (!Number.isNaN(direct.getTime())) return direct.toISOString();
 
@@ -383,27 +383,36 @@ function mapQueueRowToChat(
   agentUser?: User,
 ): Chat {
   const id = String(row.chatIndex);
+  const number = String(row.number ?? "").trim();
+  const email = String(row.email ?? "").trim();
+  const messageTime = String(row.messageTime ?? "");
+  const lastMsg = String(row.lastMsg ?? "").trim();
+  const userName = String(row.userName ?? "").trim();
+  const profilePic = String(row.profilePic ?? "").trim();
+
   const customer: User = {
-    id: row.email || row.number,
-    name: row.userName?.trim() || row.number,
+    id: email || number || id,
+    name: userName || number || email || "Customer",
     role: "customer",
-    avatar: row.profilePic?.trim() ? row.profilePic : undefined,
-    email: row.email,
-    phone: row.number,
-    city: row.city?.trim() || undefined,
-    country: row.country?.trim() || undefined,
-    region: row.region?.trim() || undefined,
+    avatar: profilePic || undefined,
+    email: email || undefined,
+    phone: number || undefined,
+    city: row.city != null ? String(row.city).trim() || undefined : undefined,
+    country:
+      row.country != null ? String(row.country).trim() || undefined : undefined,
+    region:
+      row.region != null ? String(row.region).trim() || undefined : undefined,
   };
 
   let lastMessage: Message | undefined;
-  if (row.lastMsg?.trim()) {
+  if (lastMsg) {
     lastMessage = {
       id: `last-${id}`,
       chatId: id,
       senderId: customer.id,
       senderRole: "customer",
-      text: row.lastMsg,
-      createdAt: parseMessageTime(row.messageTime),
+      text: lastMsg,
+      createdAt: parseMessageTime(messageTime),
     };
   }
 
@@ -431,10 +440,10 @@ function mapQueueRowToChat(
     agent: status === "assigned" ? agentUser : undefined,
     status,
     lastMessage,
-    createdAt: parseMessageTime(row.messageTime),
+    createdAt: parseMessageTime(messageTime),
     messageTimeDisplay:
-      row.messageTime.trim() !== ""
-        ? formatMessageTimeForDisplay(row.messageTime)
+      messageTime.trim() !== ""
+        ? formatMessageTimeForDisplay(messageTime)
         : undefined,
     whatsappChatIndex: row.chatIndex,
     isChatActive: parseOptionalIsChatActive(

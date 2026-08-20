@@ -1,6 +1,6 @@
 /** Two-letter abbreviation from display name (e.g. "Kaif Khatri" → "KK", one word → first two letters). */
-export function nameToInitials(name: string): string {
-  const trimmed = name.trim();
+export function nameToInitials(name: string | null | undefined): string {
+  const trimmed = String(name ?? "").trim();
   if (!trimmed) return "?";
 
   const parts = trimmed.split(/\s+/).filter((p) => p.length > 0);
