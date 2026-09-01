@@ -66,7 +66,7 @@ const tooltipProps = {
 export function DashboardChartsPanel({
   supervisorUserId = STATIC_SUPERVISOR.id,
 }: {
-  /** Dev: forwarded as `Userid` query param when `NODE_ENV === "development"`; default {@link STATIC_SUPERVISOR.id}. */
+  /** Reserved for future auth; KPIs use session cookies. */
   supervisorUserId?: string;
 }) {
   const { data: kpi, loading: kpiLoading, error: kpiError } =

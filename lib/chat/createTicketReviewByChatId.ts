@@ -1,13 +1,10 @@
-const DEFAULT_HTTP_API_ORIGIN = "http://10.0.10.53:8080";
+import {
+  getSesApiOrigin,
+  SES_API_FETCH_CREDENTIALS,
+} from "@/lib/agent/sesApiOrigin";
+
 const DEFAULT_CREATE_TICKET_REVIEW_PATH =
   "/SES/app/SocialMedia/whatsapp/createTicketReviewByChatId";
-
-function getDefaultApiOrigin(): string {
-  if (typeof window === "undefined") return DEFAULT_HTTP_API_ORIGIN;
-  return window.location.protocol === "https:"
-    ? window.location.origin
-    : DEFAULT_HTTP_API_ORIGIN;
-}
 
 function getCreateTicketReviewByChatIdUrl(): string {
   const fromEnv =
@@ -17,18 +14,8 @@ function getCreateTicketReviewByChatIdUrl(): string {
       : undefined;
   return (
     fromEnv ??
-    `${getDefaultApiOrigin()}${DEFAULT_CREATE_TICKET_REVIEW_PATH}`
+    `${getSesApiOrigin()}${DEFAULT_CREATE_TICKET_REVIEW_PATH}`
   ).replace(/\/$/, "");
-}
-
-function shouldSendUserIdInParams(): boolean {
-  return (
-    typeof process !== "undefined" && process.env.NODE_ENV === "development"
-  );
-}
-
-function getApiFetchCredentials(): RequestCredentials {
-  return shouldSendUserIdInParams() ? "omit" : "include";
 }
 
 export type CreateTicketReviewByChatIdBody = {
@@ -57,7 +44,7 @@ export async function postCreateTicketReviewByChatId(
   url.searchParams.set("Userid", agentUserId);
   const res = await fetch(url.toString(), {
     method: "POST",
-    credentials: getApiFetchCredentials(),
+    credentials: SES_API_FETCH_CREDENTIALS,
     body: JSON.stringify({
       chatIndex: body.chatIndex,
       ticketIndex: body.ticketIndex,

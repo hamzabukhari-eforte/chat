@@ -3,16 +3,13 @@
  * Used for cascading ticket dropdowns (domain → complaint type, etc.).
  */
 
-const DEFAULT_HTTP_API_ORIGIN = "http://10.0.10.53:8080";
+import {
+  getSesApiOrigin,
+  SES_API_FETCH_CREDENTIALS,
+} from "@/lib/agent/sesApiOrigin";
+
 const DEFAULT_REGISTER_COMPLAINT_VIEW_PATH = "/SES/registercomplaint/view";
 const DEFAULT_GENERATE_COMPLAINT_VIEW_PATH = "/SES/generatecomplaint/view";
-
-function getDefaultApiOrigin(): string {
-  if (typeof window === "undefined") return DEFAULT_HTTP_API_ORIGIN;
-  return window.location.protocol === "https:"
-    ? window.location.origin
-    : DEFAULT_HTTP_API_ORIGIN;
-}
 
 export function getRegisterComplaintViewUrl(): string {
   const fromEnv =
@@ -21,7 +18,7 @@ export function getRegisterComplaintViewUrl(): string {
       ? process.env.NEXT_PUBLIC_REGISTER_COMPLAINT_VIEW_URL.trim()
       : undefined;
   return (
-    fromEnv ?? `${getDefaultApiOrigin()}${DEFAULT_REGISTER_COMPLAINT_VIEW_PATH}`
+    fromEnv ?? `${getSesApiOrigin()}${DEFAULT_REGISTER_COMPLAINT_VIEW_PATH}`
   ).replace(/\/$/, "");
 }
 
@@ -32,18 +29,8 @@ export function getGenerateComplaintViewUrl(): string {
       ? process.env.NEXT_PUBLIC_GENERATE_COMPLAINT_VIEW_URL.trim()
       : undefined;
   return (
-    fromEnv ?? `${getDefaultApiOrigin()}${DEFAULT_GENERATE_COMPLAINT_VIEW_PATH}`
+    fromEnv ?? `${getSesApiOrigin()}${DEFAULT_GENERATE_COMPLAINT_VIEW_PATH}`
   ).replace(/\/$/, "");
-}
-
-function shouldSendUserIdInParams(): boolean {
-  return (
-    typeof process !== "undefined" && process.env.NODE_ENV === "development"
-  );
-}
-
-function getApiFetchCredentials(): RequestCredentials {
-  return shouldSendUserIdInParams() ? "omit" : "include";
 }
 
 export type RegisterComplaintOption = { id: string; name: string };
@@ -141,7 +128,7 @@ export async function postRegisterComplaintView(body: {
 
   const res = await fetch(url.toString(), {
     method: "POST",
-    credentials: getApiFetchCredentials(),
+    credentials: SES_API_FETCH_CREDENTIALS,
   });
   const text = await res.text();
   if (!res.ok) {
@@ -164,7 +151,7 @@ export async function postGenerateComplaintViewSavedata(
   }
   const res = await fetch(url.toString(), {
     method: "POST",
-    credentials: getApiFetchCredentials(),
+    credentials: SES_API_FETCH_CREDENTIALS,
     body: form,
   });
   const text = await res.text();

@@ -13,8 +13,7 @@ export type UseWhatsappDashboardKpisState = {
 
 /**
  * Loads supervisor dashboard KPIs from POST `/SES/app/SocialMedia/whatsapp/dashboard`.
- * In development, `Userid` is sent: optional override via `supervisorUserId`, otherwise
- * `STATIC_SUPERVISOR.id` (`mahnoor.z`). Production uses session cookies only.
+ * Auth uses session cookies (`credentials: "include"`).
  */
 export function useWhatsappDashboardKpis(
   supervisorUserId: string,

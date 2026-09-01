@@ -6,32 +6,24 @@ import { createPortal } from "react-dom";
 import { FiArrowLeft } from "react-icons/fi";
 import { toast } from "sonner";
 import { Button } from "@/components/ui/button";
+import {
+  getSesApiOrigin,
+  SES_API_FETCH_CREDENTIALS,
+} from "@/lib/agent/sesApiOrigin";
 import type { AwayReasonOption } from "@/lib/chat/types";
 import { BreakAwayModal } from "./agent-header/BreakAwayModal";
 import { AwayStatusControl } from "./agent-header/AwayStatusControl";
 
-const HTTP_API_ORIGIN = "http://10.0.10.53:8080";
 const GET_AWAY_REASON_PATH = "/SES/app/getawayreason";
 
-function getApiOrigin(): string {
-  if (typeof window === "undefined") return HTTP_API_ORIGIN;
-  return window.location.protocol === "https:"
-    ? window.location.origin
-    : HTTP_API_ORIGIN;
-}
-
 function getAwayReasonUrl(): string {
-  return `${getApiOrigin()}${GET_AWAY_REASON_PATH}`.replace(/\/$/, "");
-}
-
-function getApiFetchCredentials(): RequestCredentials {
-  return process.env.NODE_ENV === "development" ? "omit" : "include";
+  return `${getSesApiOrigin()}${GET_AWAY_REASON_PATH}`.replace(/\/$/, "");
 }
 
 async function postAwayReason(reason: string): Promise<void> {
   const res = await fetch(getAwayReasonUrl(), {
     method: "POST",
-    credentials: getApiFetchCredentials(),
+    credentials: SES_API_FETCH_CREDENTIALS,
     body: JSON.stringify({
       status: "Away",
       reason,
@@ -46,7 +38,7 @@ async function postAwayReason(reason: string): Promise<void> {
 async function postReturnOnline(password: string): Promise<boolean> {
   const res = await fetch(getAwayReasonUrl(), {
     method: "POST",
-    credentials: getApiFetchCredentials(),
+    credentials: SES_API_FETCH_CREDENTIALS,
     body: JSON.stringify({
       password,
       check: "0",

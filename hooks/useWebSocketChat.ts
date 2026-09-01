@@ -41,6 +41,7 @@ import {
   WHATSAPP_SOCIAL_CHANNEL_CONFIG,
   type SocialChannelChatConfig,
 } from "@/lib/agent/socialChannelConfig";
+import { SES_API_FETCH_CREDENTIALS } from "@/lib/agent/sesApiOrigin";
 import { toast } from "sonner";
 
 /**
@@ -58,16 +59,6 @@ const WS_FILE_WAIT_ACK_AFTER_METADATA =
  * Set true if the server only signals readiness per chunk (not only once after metadata).
  */
 const WS_FILE_WAIT_ACK_AFTER_EACH_CHUNK = false;
-
-function shouldSendUserIdInParams(): boolean {
-  return (
-    typeof process !== "undefined" && process.env.NODE_ENV === "development"
-  );
-}
-
-function getApiFetchCredentials(): RequestCredentials {
-  return shouldSendUserIdInParams() ? "omit" : "include";
-}
 
 function parseLooseBoolean(raw: unknown): boolean | null {
   if (typeof raw === "boolean") return raw;
@@ -115,7 +106,7 @@ async function fetchAutoAssignmentStatus(
   url.searchParams.set("Userid", userId);
   const res = await fetch(url.toString(), {
     method: "POST",
-    credentials: getApiFetchCredentials(),
+    credentials: SES_API_FETCH_CREDENTIALS,
   });
   if (!res.ok) {
     throw new Error(`getAutoAssignmentStatus failed: ${res.status}`);
@@ -492,15 +483,72 @@ function mapNewChatInQueueDataToChat(data: Record<string, unknown>): Chat | null
 
 type LoadConversationApiRow = Record<string, unknown>;
 
+function flattenConversationRowFields(
+  row: LoadConversationApiRow,
+): Record<string, unknown> {
+  const fields: Record<string, unknown> = { ...row };
+  delete fields.msgDetails;
+  const raw = row.msgDetails;
+  if (raw && typeof raw === "object" && !Array.isArray(raw)) {
+    Object.assign(fields, raw as Record<string, unknown>);
+  } else if (typeof raw === "string" && raw.trim()) {
+    try {
+      const parsed = JSON.parse(raw) as unknown;
+      if (parsed && typeof parsed === "object" && !Array.isArray(parsed)) {
+        Object.assign(fields, parsed as Record<string, unknown>);
+      }
+    } catch {
+      // ignore non-JSON msgDetails
+    }
+  }
+  return fields;
+}
+
+function extractConversationMessageRows(json: unknown): LoadConversationApiRow[] {
+  const pickRows = (o: Record<string, unknown>): LoadConversationApiRow[] | null => {
+    for (const key of [
+      "conversation",
+      "messages",
+      "messageList",
+      "chatMessages",
+    ]) {
+      const v = o[key];
+      if (Array.isArray(v) && v.length > 0) {
+        return v as LoadConversationApiRow[];
+      }
+    }
+    for (const key of ["conversation", "messages", "messageList", "chatMessages"]) {
+      const v = o[key];
+      if (Array.isArray(v)) return v as LoadConversationApiRow[];
+    }
+    return null;
+  };
+
+  if (Array.isArray(json)) return json as LoadConversationApiRow[];
+  if (!json || typeof json !== "object") return [];
+
+  const root = json as Record<string, unknown>;
+  const fromRoot = pickRows(root);
+  if (fromRoot) return fromRoot;
+
+  for (const nestedKey of ["data", "result"]) {
+    const nested = root[nestedKey];
+    if (nested && typeof nested === "object" && !Array.isArray(nested)) {
+      const fromNested = pickRows(nested as Record<string, unknown>);
+      if (fromNested) return fromNested;
+    }
+    if (Array.isArray(nested)) return nested as LoadConversationApiRow[];
+  }
+
+  return [];
+}
+
 /**
  * API `loadConversationById` rows only (WebSocket `NEW_MESSAGE` uses `lib/websocket/client.ts`).
  * `isFromAgent === true` → agent (right); else customer (left).
  */
 function inferSenderRole(row: LoadConversationApiRow): "agent" | "customer" {
-  const merged: Record<string, unknown> = { ...row };
-  if (row.msgDetails && typeof row.msgDetails === "object") {
-    Object.assign(merged, row.msgDetails as Record<string, unknown>);
-  }
+  const merged = flattenConversationRowFields(row);
 
   const isFromAgent = merged.isFromAgent;
   if (typeof isFromAgent === "boolean") {
@@ -550,11 +598,7 @@ function mapApiRowToMessage(
       "",
   );
 
-  const fields: Record<string, unknown> = { ...row };
-  delete fields.msgDetails;
-  if (row.msgDetails && typeof row.msgDetails === "object") {
-    Object.assign(fields, row.msgDetails as Record<string, unknown>);
-  }
+  const fields = flattenConversationRowFields(row);
 
   const messageHeader = String(fields.messageHeader ?? "").trim();
   const embeddedClock = messageHeader
@@ -611,7 +655,9 @@ function mapApiRowToMessage(
 
   const attachments =
     Number.isFinite(apiMessageType) && apiMessageType === 2
-      ? attachmentsFromSesFields(fields, attachmentIdPrefix)
+      ? attachmentsFromSesFields(fields, attachmentIdPrefix, {
+          trustApiFilename: true,
+        })
       : undefined;
   const displayText = stripSesPlaceholderCaption(
     normalizeLoadConversationApiMessageText(text),
@@ -640,16 +686,7 @@ function parseLoadConversationMessages(
   agentUserId: string,
   customerId: string,
 ): Message[] {
-  let rows: LoadConversationApiRow[] = [];
-  if (Array.isArray(json)) {
-    rows = json as LoadConversationApiRow[];
-  } else if (json && typeof json === "object") {
-    const o = json as Record<string, unknown>;
-    if (Array.isArray(o.messages)) rows = o.messages as LoadConversationApiRow[];
-    else if (Array.isArray(o.data)) rows = o.data as LoadConversationApiRow[];
-    else if (Array.isArray(o.conversation))
-      rows = o.conversation as LoadConversationApiRow[];
-  }
+  const rows = extractConversationMessageRows(json);
   return rows.map((row, i) =>
     mapApiRowToMessage(row, chatId, i, agentUserId, customerId),
   );
@@ -714,7 +751,7 @@ async function fetchTicketListByChatId(
   url.searchParams.set("Userid", agentUserId);
   const res = await fetch(url.toString(), {
     method: "POST",
-    credentials: getApiFetchCredentials(),
+    credentials: SES_API_FETCH_CREDENTIALS,
     body: JSON.stringify({ chatIndex }),
   });
   if (!res.ok) {
@@ -753,7 +790,7 @@ async function fetchConversationByChatIndex(
 
   const res = await fetch(url.toString(), {
     method: "POST",
-    credentials: getApiFetchCredentials(),
+    credentials: SES_API_FETCH_CREDENTIALS,
     body: JSON.stringify({ chatIndex }),
   });
   if (!res.ok) {
@@ -818,13 +855,9 @@ async function fetchQueueAndAssignedChats(
   awayReasons: AwayReasonOption[];
 }> {
   const url = new URL(urls.queueChats);
-  if (shouldSendUserIdInParams()) {
-    url.searchParams.set("Userid", agent.id);
-  }
-
   const res = await fetch(url.toString(), {
     method: "POST",
-    credentials: getApiFetchCredentials(),
+    credentials: SES_API_FETCH_CREDENTIALS,
   });
   if (!res.ok) {
     throw new Error(`Queue chats failed: ${res.status}`);
@@ -917,12 +950,9 @@ async function assignChatToAgent(
   userId: string,
 ): Promise<number | null> {
   const url = new URL(urls.assignChat);
-  if (shouldSendUserIdInParams()) {
-    url.searchParams.set("Userid", userId);
-  }
   const res = await fetch(url.toString(), {
     method: "POST",
-    credentials: getApiFetchCredentials(),
+    credentials: SES_API_FETCH_CREDENTIALS,
     body: JSON.stringify({
       chatIndex,
       domainIndex,
@@ -952,12 +982,9 @@ async function transferChannelChat(
   const ci = chatIndexToApiInt(chatIndex);
   if (ci === null) return null;
   const url = new URL(urls.transferChat);
-  if (shouldSendUserIdInParams()) {
-    url.searchParams.set("Userid", userId);
-  }
   const res = await fetch(url.toString(), {
     method: "POST",
-    credentials: getApiFetchCredentials(),
+    credentials: SES_API_FETCH_CREDENTIALS,
     body: JSON.stringify({
       chatIndex: ci,
       domainIndex: Math.trunc(domainIndex),
@@ -981,12 +1008,9 @@ async function closeChannelChat(
   userId: string,
 ): Promise<number | null> {
   const url = new URL(urls.closeChat);
-  if (shouldSendUserIdInParams()) {
-    url.searchParams.set("Userid", userId);
-  }
   const res = await fetch(url.toString(), {
     method: "POST",
-    credentials: getApiFetchCredentials(),
+    credentials: SES_API_FETCH_CREDENTIALS,
     body: JSON.stringify({
       chatIndex,
       domainIndex,
@@ -1664,10 +1688,31 @@ export function useWebSocketChat(
                 messagesAreSameListItem(m, echoWithClientTime),
               )
             ) {
-              if (withoutMatchingOptimistic.length === prev.messages.length) {
-                return prev;
-              }
-              return { ...prev, messages: withoutMatchingOptimistic };
+              return {
+                ...prev,
+                messages: withoutMatchingOptimistic.map((m) => {
+                  if (!messagesAreSameListItem(m, echoWithClientTime)) return m;
+                  const incomingLegacyAttachment =
+                    echoWithClientTime.attachments?.some((a) =>
+                      /\/recattachments\//i.test(a.url ?? ""),
+                    ) ?? false;
+                  const existingMediaAttachment =
+                    m.attachments?.some((a) =>
+                      /\/media\//i.test(a.url ?? ""),
+                    ) ?? false;
+                  return {
+                    ...m,
+                    chatSeenStatus:
+                      echoWithClientTime.chatSeenStatus ?? m.chatSeenStatus,
+                    attachments:
+                      incomingLegacyAttachment && existingMediaAttachment
+                        ? m.attachments
+                        : echoWithClientTime.attachments?.length
+                          ? echoWithClientTime.attachments
+                          : m.attachments,
+                  };
+                }),
+              };
             }
             const applied = applyPendingSeenToMessage(
               echoWithClientTime,

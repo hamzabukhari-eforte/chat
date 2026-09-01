@@ -1,4 +1,5 @@
 import type { Attachment } from "./types";
+import { getSesApiOrigin } from "@/lib/agent/sesApiOrigin";
 
 /** Origin for relative paths like `/attachments/chatmedia/...` (no trailing slash). */
 export function getSesMediaOrigin(): string {
@@ -8,23 +9,7 @@ export function getSesMediaOrigin(): string {
   ) {
     return process.env.NEXT_PUBLIC_SES_MEDIA_ORIGIN.replace(/\/$/, "");
   }
-  // Dev: always use the SES media server host.
-  if (
-    typeof process !== "undefined" &&
-    process.env.NODE_ENV === "development"
-  ) {
-    return "http://10.0.10.53:8080";
-  }
-
-  // Build/production: derive origin from the current browser host.
-  if (typeof window !== "undefined" && window.location?.host) {
-    const protocol =
-      window.location.protocol === "https:" ? "https://" : "http://";
-    return `${protocol}${window.location.host}`.replace(/\/$/, "");
-  }
-
-  // Fallback for non-browser contexts.
-  return "http://10.0.10.53:8080";
+  return getSesApiOrigin();
 }
 
 /** True when the API already gave a canonical storage path (do not rewrite folder). */
@@ -33,7 +18,8 @@ function isSesStoragePath(p: string): boolean {
   return (
     x.includes("/recattachments/") ||
     x.includes("/sentattachments/") ||
-    x.includes("/attachments/")
+    x.includes("/attachments/") ||
+    x.includes("/media/")
   );
 }
 
@@ -51,7 +37,8 @@ function normalizeBareToRecattachmentsPath(pathOrUrl: string): string {
       if (
         p !== "/" &&
         !p.includes("/recattachments/") &&
-        !p.includes("/sentattachments/")
+        !p.includes("/sentattachments/") &&
+        !p.includes("/media/")
       ) {
         const segs = p.split("/").filter(Boolean);
         if (segs.length === 1 && /\.[a-z0-9]{2,12}$/i.test(segs[0])) {
@@ -156,6 +143,50 @@ function sesMediaUrlLooksLikeDeliveryPlaceholder(url: string): boolean {
   return false;
 }
 
+export type AttachmentsFromSesFieldsOptions = {
+  /** @deprecated Always uses `fields.filename` when present; kept for call-site clarity. */
+  trustApiFilename?: boolean;
+};
+
+function normalizeApiWireFilename(pathOrUrl: string): string {
+  const s = pathOrUrl.trim();
+  if (!s) return "";
+  if (/^https?:\/\//i.test(s)) return s;
+  return s.startsWith("/") ? s : `/${s}`;
+}
+
+function pathBasename(path: string): string {
+  return path.split("/").filter(Boolean).pop() ?? "";
+}
+
+function pickApiWireFilename(fields: Record<string, unknown>): string {
+  return normalizeApiWireFilename(cleanSesScalar(fields.filename));
+}
+
+function isUsableApiWireFilename(path: string): boolean {
+  if (!path || path === "/") return false;
+  const base = pathBasename(path);
+  return looksLikePlausibleFileBasename(base);
+}
+
+function attachmentFromWirePath(
+  attachmentId: string,
+  wirePath: string,
+  displayFileName: string,
+  msgType: number,
+  mimeHint: string,
+): Attachment[] | undefined {
+  const url = resolveMediaUrl(wirePath);
+  const displayName =
+    displayFileName && looksLikePlausibleFileBasename(displayFileName)
+      ? displayFileName
+      : urlPathBasename(url) || "attachment";
+  if (sesMediaUrlLooksLikeDeliveryPlaceholder(url)) {
+    return undefined;
+  }
+  return [inferAttachment(attachmentId, displayName, url, msgType, mimeHint)];
+}
+
 /**
  * Build attachment list from SES `msgDetails` (WebSocket) or conversation API rows.
  * msgType is backend-specific; we infer image vs file from extension and common codes.
@@ -163,8 +194,11 @@ function sesMediaUrlLooksLikeDeliveryPlaceholder(url: string): boolean {
 export function attachmentsFromSesFields(
   fields: Record<string, unknown>,
   attachmentId: string,
+  _options?: AttachmentsFromSesFieldsOptions,
 ): Attachment[] | undefined {
-  // Wire path for URLs: `/sentattachments/…` or `/recattachments/…` (lowercase `filename` on API).
+  const apiWireFilename = pickApiWireFilename(fields);
+
+  // Wire path for URLs: `filename` from API (e.g. `/media/whatsapp/sent/…`).
   let apiFilenamePath = cleanSesScalar(
     (fields as Record<string, unknown>).filename ??
       fields.FileName ??
@@ -218,7 +252,10 @@ export function attachmentsFromSesFields(
   // If `fileName` repeats the wire storage path, prefer `actualFilename` / URL basename for label.
   if (fileName) {
     const fnNorm = fileName.startsWith("/") ? fileName : `/${fileName}`;
-    if (isSesStoragePath(fnNorm)) {
+    if (
+      isSesStoragePath(fnNorm) ||
+      (apiWireFilename && fnNorm === apiWireFilename)
+    ) {
       fileName = "";
     }
   }
@@ -312,18 +349,24 @@ export function attachmentsFromSesFields(
     return [inferAttachment(attachmentId, name, url, msgType, mimeHint)];
   }
 
-  if (normalizedApiPath && isSesStoragePath(normalizedApiPath)) {
-    const url = resolveMediaUrl(
-      normalizeBareToRecattachmentsPath(normalizedApiPath),
+  if (isUsableApiWireFilename(apiWireFilename)) {
+    return attachmentFromWirePath(
+      attachmentId,
+      apiWireFilename,
+      fileName,
+      msgType,
+      mimeHint,
     );
-    const displayName =
-      fileName && looksLikePlausibleFileBasename(fileName)
-        ? fileName
-        : urlPathBasename(url) || "attachment";
-    if (sesMediaUrlLooksLikeDeliveryPlaceholder(url)) {
-      return undefined;
-    }
-    return [inferAttachment(attachmentId, displayName, url, msgType, mimeHint)];
+  }
+
+  if (normalizedApiPath && isSesStoragePath(normalizedApiPath)) {
+    return attachmentFromWirePath(
+      attachmentId,
+      normalizedApiPath,
+      fileName,
+      msgType,
+      mimeHint,
+    );
   }
 
   const nameFromMessage =

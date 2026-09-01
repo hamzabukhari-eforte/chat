@@ -3,17 +3,12 @@
  * Mirrors other SES WhatsApp HTTP helpers (`createTicketReviewByChatId`, queue fetch).
  */
 
-import { STATIC_SUPERVISOR } from "@/lib/supervisor/staticSupervisor";
+import {
+  getSesApiOrigin,
+  SES_API_FETCH_CREDENTIALS,
+} from "@/lib/agent/sesApiOrigin";
 
-const DEFAULT_HTTP_API_ORIGIN = "http://10.0.10.53:8080";
 const DEFAULT_WHATSAPP_DASHBOARD_PATH = "/SES/app/SocialMedia/whatsapp/dashboard";
-
-function getDefaultApiOrigin(): string {
-  if (typeof window === "undefined") return DEFAULT_HTTP_API_ORIGIN;
-  return window.location.protocol === "https:"
-    ? window.location.origin
-    : DEFAULT_HTTP_API_ORIGIN;
-}
 
 function getWhatsappDashboardUrl(): string {
   const fromEnv =
@@ -22,18 +17,8 @@ function getWhatsappDashboardUrl(): string {
       ? process.env.NEXT_PUBLIC_WHATSAPP_DASHBOARD_URL.trim()
       : undefined;
   return (
-    fromEnv ?? `${getDefaultApiOrigin()}${DEFAULT_WHATSAPP_DASHBOARD_PATH}`
+    fromEnv ?? `${getSesApiOrigin()}${DEFAULT_WHATSAPP_DASHBOARD_PATH}`
   ).replace(/\/$/, "");
-}
-
-function shouldSendUserIdInParams(): boolean {
-  return (
-    typeof process !== "undefined" && process.env.NODE_ENV === "development"
-  );
-}
-
-function getApiFetchCredentials(): RequestCredentials {
-  return shouldSendUserIdInParams() ? "omit" : "include";
 }
 
 export type WhatsappDashboardKpis = {
@@ -258,23 +243,17 @@ export function parseWhatsappDashboardKpis(json: unknown): WhatsappDashboardKpis
 }
 
 /**
- * POST dashboard KPIs. In development, always sends `Userid`: `supervisorUserId` if set,
- * otherwise {@link STATIC_SUPERVISOR.id}.
+ * POST dashboard KPIs. Auth via session cookies (`credentials: "include"`).
  */
 export async function postWhatsappDashboardKpis(
-  supervisorUserId: string,
+  _supervisorUserId: string,
   body: Record<string, unknown> = {},
 ): Promise<WhatsappDashboardKpis> {
   const url = new URL(getWhatsappDashboardUrl());
-  if (shouldSendUserIdInParams()) {
-    const userId =
-      supervisorUserId.trim() || STATIC_SUPERVISOR.id;
-    url.searchParams.set("Userid", userId);
-  }
 
   const res = await fetch(url.toString(), {
     method: "POST",
-    credentials: getApiFetchCredentials(),
+    credentials: SES_API_FETCH_CREDENTIALS,
     body: JSON.stringify(body),
   });
 

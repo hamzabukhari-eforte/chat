@@ -2,6 +2,10 @@
 
 import { useCallback, useEffect, useRef, useState } from "react";
 import { toast } from "sonner";
+import {
+  getSesApiOrigin,
+  SES_API_FETCH_CREDENTIALS,
+} from "@/lib/agent/sesApiOrigin";
 import { postCreateTicketReviewByChatId } from "@/lib/chat/createTicketReviewByChatId";
 import { parseTicketListRow } from "@/lib/chat/ticketList";
 import type { CustomerChatTicket } from "@/lib/chat/types";
@@ -23,16 +27,8 @@ type Props = {
   createTicketReviewUrl?: string;
 };
 
-const DEFAULT_HTTP_API_ORIGIN = "http://10.0.10.53:8080";
 const DEFAULT_TICKET_DETAILS_BY_INDEX_PATH =
   "/SES/assigncomplaint/GetTicketDetailsByIndex";
-
-function getDefaultApiOrigin(): string {
-  if (typeof window === "undefined") return DEFAULT_HTTP_API_ORIGIN;
-  return window.location.protocol === "https:"
-    ? window.location.origin
-    : DEFAULT_HTTP_API_ORIGIN;
-}
 
 function getTicketDetailsByIndexUrl(): string {
   const fromEnv =
@@ -42,18 +38,8 @@ function getTicketDetailsByIndexUrl(): string {
       : undefined;
   return (
     fromEnv ??
-    `${getDefaultApiOrigin()}${DEFAULT_TICKET_DETAILS_BY_INDEX_PATH}`
+    `${getSesApiOrigin()}${DEFAULT_TICKET_DETAILS_BY_INDEX_PATH}`
   ).replace(/\/$/, "");
-}
-
-function shouldSendUserIdInParams(): boolean {
-  return (
-    typeof process !== "undefined" && process.env.NODE_ENV === "development"
-  );
-}
-
-function getApiFetchCredentials(): RequestCredentials {
-  return shouldSendUserIdInParams() ? "omit" : "include";
 }
 
 async function fetchTicketDetailsByIndexPtr(
@@ -65,7 +51,7 @@ async function fetchTicketDetailsByIndexPtr(
   url.searchParams.set("indexptr", ptr);
   const res = await fetch(url.toString(), {
     method: "POST",
-    credentials: getApiFetchCredentials(),
+    credentials: SES_API_FETCH_CREDENTIALS,
   });
   if (!res.ok) {
     throw new Error(`GetTicketDetailsByIndex failed: ${res.status}`);

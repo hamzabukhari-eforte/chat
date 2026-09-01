@@ -2,10 +2,10 @@ import {
   defaultApiPathForConfig,
   type SocialChannelChatConfig,
 } from "@/lib/agent/socialChannelConfig";
-
-const DEFAULT_HTTP_API_ORIGIN = "http://10.0.10.53:8080";
-const DEFAULT_CHAT_WS_HOST = "10.0.10.53:8080";
-const DEFAULT_CHAT_WS_PATH = "/SES/WebLiveChat";
+import {
+  getSesApiOrigin,
+  getSesWebSocketUrl,
+} from "@/lib/agent/sesApiOrigin";
 
 export interface SocialChannelApiUrls {
   queueChats: string;
@@ -19,40 +19,22 @@ export interface SocialChannelApiUrls {
   webSocket: string;
 }
 
-function getDefaultApiOrigin(): string {
-  if (typeof window === "undefined") return DEFAULT_HTTP_API_ORIGIN;
-  return window.location.protocol === "https:"
-    ? window.location.origin
-    : DEFAULT_HTTP_API_ORIGIN;
-}
-
 function readEnv(key: string): string | undefined {
   if (typeof process === "undefined") return undefined;
   const v = process.env[key]?.trim();
   return v || undefined;
 }
 
-function resolveHttpUrl(
-  envKey: string,
-  defaultPath: string,
-): string {
+function resolveHttpUrl(envKey: string, defaultPath: string): string {
   const fromEnv = readEnv(envKey);
-  const base = fromEnv ?? `${getDefaultApiOrigin()}${defaultPath}`;
+  const base = fromEnv ?? `${getSesApiOrigin()}${defaultPath}`;
   return base.replace(/\/$/, "");
 }
 
 function resolveWebSocketUrl(config: SocialChannelChatConfig): string {
   const fromEnv = readEnv(config.envKeys.chatWsUrl);
   if (fromEnv) return fromEnv;
-
-  if (typeof window === "undefined") {
-    return `ws://${DEFAULT_CHAT_WS_HOST}${DEFAULT_CHAT_WS_PATH}`;
-  }
-  const isHttps = window.location.protocol === "https:";
-  if (isHttps) {
-    return `wss://${window.location.hostname}${DEFAULT_CHAT_WS_PATH}`;
-  }
-  return `ws://${DEFAULT_CHAT_WS_HOST}${DEFAULT_CHAT_WS_PATH}`;
+  return getSesWebSocketUrl();
 }
 
 export function createSocialChannelApiUrls(
