@@ -23,17 +23,14 @@ import { AgentAppHeader } from "./AgentAppHeader";
 import { ChatSidebarSection } from "./ChatSidebarSection";
 import { ChatWindowSection } from "./ChatWindowSection";
 import { CustomerInfoSidebarSection } from "./CustomerInfoSidebarSection";
+import { FacebookPostsInboxSection } from "./FacebookPostsInboxSection";
 import { AGENT_APP_HEADER_HEIGHT_VAR } from "@/lib/layout/agentAppLayout";
 import { cn } from "@/lib/utils";
 
 const CHANNEL_PLACEHOLDER: Record<
-  Exclude<ChannelId, "whatsapp" | "messenger" | "instagram-inbox">,
+  Exclude<ChannelId, "whatsapp" | "messenger" | "instagram-inbox" | "facebook">,
   { title: string; subtitle: string }
 > = {
-  facebook: {
-    title: "Facebook",
-    subtitle: "Facebook inbox is not connected yet. Switch to WhatsApp for live conversations.",
-  },
   instagram: {
     title: "Instagram",
     subtitle: "Instagram inbox is not connected yet. Switch to WhatsApp for live conversations.",
@@ -189,7 +186,12 @@ function AgentDashboardContent({
           onChannelChange={onChannelChange ?? (() => {})}
         />
 
-        {isLiveAgentInboxChannel(activeChannel) ? (
+        {activeChannel === "facebook" ? (
+          <FacebookPostsInboxSection
+            agentId={STATIC_AGENT.id}
+            agentName={STATIC_AGENT.name}
+          />
+        ) : isLiveAgentInboxChannel(activeChannel) ? (
         <>
           <div
             className={cn(

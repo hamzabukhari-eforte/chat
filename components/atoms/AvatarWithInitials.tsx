@@ -25,14 +25,19 @@ export function AvatarWithInitials({
 
   if (hasImage) {
     return (
-      <Image
-        src={src.trim()}
-        alt={alt ?? name}
-        width={size}
-        height={size}
-        className={`rounded-full object-cover shrink-0 ${className}`}
-        unoptimized
-      />
+      <div
+        className={`relative shrink-0 overflow-hidden rounded-full ${className}`}
+        style={{ width: size, height: size }}
+      >
+        <Image
+          src={src.trim()}
+          alt={alt ?? name}
+          fill
+          unoptimized
+          sizes={`${size}px`}
+          className="rounded-full object-cover"
+        />
+      </div>
     );
   }
 
