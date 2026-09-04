@@ -27,15 +27,6 @@ import { FacebookPostsInboxSection } from "./FacebookPostsInboxSection";
 import { AGENT_APP_HEADER_HEIGHT_VAR } from "@/lib/layout/agentAppLayout";
 import { cn } from "@/lib/utils";
 
-const CHANNEL_PLACEHOLDER: Record<
-  Exclude<ChannelId, "whatsapp" | "messenger" | "instagram-inbox" | "facebook">,
-  { title: string; subtitle: string }
-> = {
-  instagram: {
-    title: "Instagram",
-    subtitle: "Instagram inbox is not connected yet. Switch to WhatsApp for live conversations.",
-  },
-};
 
 const STATIC_AGENT = {
   id: "mahnoor.z",
@@ -186,8 +177,10 @@ function AgentDashboardContent({
           onChannelChange={onChannelChange ?? (() => {})}
         />
 
-        {activeChannel === "facebook" ? (
+        {activeChannel === "facebook" || activeChannel === "instagram" ? (
           <FacebookPostsInboxSection
+            key={activeChannel}
+            platform={activeChannel}
             agentId={STATIC_AGENT.id}
             agentName={STATIC_AGENT.name}
           />
@@ -298,25 +291,7 @@ function AgentDashboardContent({
             )}
           </AnimatePresence>
         </>
-      ) : (
-        <div className="flex-1 flex flex-col items-center justify-center bg-surface text-center px-6">
-          <p className="text-lg font-semibold text-gray-800">
-            {CHANNEL_PLACEHOLDER[activeChannel].title}
-          </p>
-          <p className="mt-2 text-sm text-gray-500 max-w-md">
-            {CHANNEL_PLACEHOLDER[activeChannel].subtitle}
-          </p>
-          {onChannelChange ? (
-            <button
-              type="button"
-              onClick={() => onChannelChange("whatsapp")}
-              className="mt-6 px-4 py-2 rounded-lg bg-brand-600 text-white text-sm font-medium hover:bg-brand-700 transition-colors cursor-pointer"
-            >
-              Open WhatsApp
-            </button>
-          ) : null}
-        </div>
-        )}
+      ) : null}
       </div>
     </div>
   );

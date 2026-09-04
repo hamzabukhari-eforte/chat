@@ -39,11 +39,11 @@ const CHANNELS: ChannelDef[] = [
     label: "Messenger",
     icon: <SiMessenger className="text-xl text-blue-500 shrink-0" />,
   },
-  // {
-  //   id: "instagram",
-  //   label: "Instagram",
-  //   icon: <SiInstagram className="text-xl text-pink-500 shrink-0" />,
-  // },
+  {
+    id: "instagram",
+    label: "Instagram",
+    icon: <SiInstagram className="text-xl text-pink-500 shrink-0" />,
+  },
   {
     id: "instagram-inbox",
     label: "Instagram Inbox",

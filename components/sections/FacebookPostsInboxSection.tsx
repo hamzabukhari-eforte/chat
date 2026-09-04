@@ -17,10 +17,27 @@ import type {
   FacebookPost,
   FacebookThreadReply,
 } from "@/lib/facebook/types";
+import { cloneAllDummyInstagramComments } from "@/lib/instagram/dummyComments";
+import { DUMMY_INSTAGRAM_POSTS } from "@/lib/instagram/dummyPosts";
 import { cn } from "@/lib/utils";
+
+export type SocialPostsPlatform = "facebook" | "instagram";
 
 type FacebookListTab = "posts" | "comments";
 type CommentFilter = "all" | "replied-by-me";
+
+const PLATFORM_INBOX = {
+  facebook: {
+    posts: DUMMY_FACEBOOK_POSTS,
+    cloneComments: cloneAllDummyComments,
+    listAriaLabel: "Facebook inbox lists",
+  },
+  instagram: {
+    posts: DUMMY_INSTAGRAM_POSTS,
+    cloneComments: cloneAllDummyInstagramComments,
+    listAriaLabel: "Instagram inbox lists",
+  },
+} as const;
 
 /** Insert a reply after its parent (and that parent's existing children). */
 function insertReplyUnderParent(
@@ -271,30 +288,44 @@ function CommentsColumn({
 interface FacebookPostsInboxSectionProps {
   agentId: string;
   agentName: string;
+  /** Defaults to Facebook; Instagram reuses the same posts/comments UX. */
+  platform?: SocialPostsPlatform;
 }
 
 /**
- * Facebook page comments inbox — Posts / Posts Comments + reply pane.
+ * Social page comments inbox — Posts / Posts Comments + reply pane.
+ * Used for Facebook and Instagram (dummy data until APIs are wired).
  */
 export function FacebookPostsInboxSection({
   agentId,
   agentName,
+  platform = "facebook",
 }: FacebookPostsInboxSectionProps) {
+  const inbox = PLATFORM_INBOX[platform];
+  const posts = inbox.posts;
+
   const [listTab, setListTab] = useState<FacebookListTab>("posts");
   const [selectedPostId, setSelectedPostId] = useState<string | null>(null);
   const [selectedCommentId, setSelectedCommentId] = useState<string | null>(
     null,
   );
   const [imagePreview, setImagePreview] = useState<FacebookPost | null>(null);
-  const [commentsByPost, setCommentsByPost] = useState(cloneAllDummyComments);
+  const [commentsByPost, setCommentsByPost] = useState(inbox.cloneComments);
+
+  useEffect(() => {
+    setListTab("posts");
+    setSelectedPostId(null);
+    setSelectedCommentId(null);
+    setImagePreview(null);
+    setCommentsByPost(inbox.cloneComments());
+  }, [platform, inbox]);
 
   const postComments = useMemo(
     () => (selectedPostId ? commentsByPost[selectedPostId] ?? [] : []),
     [commentsByPost, selectedPostId],
   );
 
-  const selectedPost =
-    DUMMY_FACEBOOK_POSTS.find((p) => p.id === selectedPostId) ?? null;
+  const selectedPost = posts.find((p) => p.id === selectedPostId) ?? null;
   const selectedComment =
     postComments.find((c) => c.id === selectedCommentId) ?? null;
 
@@ -404,7 +435,7 @@ export function FacebookPostsInboxSection({
         <div
           className="flex shrink-0 border-b border-gray-100 bg-white xl:hidden"
           role="tablist"
-          aria-label="Facebook inbox lists"
+          aria-label={inbox.listAriaLabel}
         >
           <button
             type="button"
@@ -427,7 +458,7 @@ export function FacebookPostsInboxSection({
                   : "bg-gray-200 text-gray-600",
               )}
             >
-              {DUMMY_FACEBOOK_POSTS.length}
+              {posts.length}
             </span>
           </button>
           <button
@@ -458,7 +489,7 @@ export function FacebookPostsInboxSection({
 
         <div className="flex min-h-0 min-w-0 flex-1 flex-col xl:flex-row">
           <PostsColumn
-            posts={DUMMY_FACEBOOK_POSTS}
+            posts={posts}
             selectedPostId={selectedPostId}
             isVisible={listTab === "posts"}
             className="xl:w-1/2 xl:border-r max-w-[400px]"
