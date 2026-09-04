@@ -285,7 +285,7 @@ export function FacebookCommentReplyPanel({
                     comment.repliedBy.agentId === agentId
                       ? "you"
                       : comment.repliedBy.agentName
-                  } · 1 agent at a time`
+                  }`
                 : "Open · Available to claim"}
           </p>
         </div>
@@ -324,24 +324,27 @@ export function FacebookCommentReplyPanel({
 
       <div ref={listRef} className="min-h-0 flex-1 overflow-y-auto">
         {/* Centered post preview */}
+        <div className="bg-gray-100/80">
+
         <div className="mx-auto flex max-w-lg flex-col items-center px-4 pt-6 pb-4 text-center">
-          <div className="relative h-32 w-32 overflow-hidden rounded-xl bg-gray-100 ring-1 ring-gray-200">
+          <div className="relative h-56 w-56 overflow-hidden rounded-xl bg-gray-200 ring-1 ring-gray-200">
             <Image
               src={post.imageUrl}
               alt=""
               fill
               unoptimized
-              sizes="128px"
+              sizes="240px"
               className="object-cover"
             />
           </div>
-          <p className="mt-3 text-sm leading-relaxed text-gray-800">
+          <p className="mt-3 text-sm leading-relaxed font-medium text-gray-800">
             {post.caption}
           </p>
         </div>
+        </div>
 
         {/* Root comment — full-width container, capped bubble */}
-        <div className="w-full border-t border-gray-100 px-4 pt-4 sm:px-6">
+        <div className="w-full border-t border-gray-200 px-4 pt-4 sm:px-6">
           <div className="flex max-w-[550px] items-start gap-2.5">
             <AvatarWithInitials
               name={comment.authorName}
@@ -451,7 +454,7 @@ export function FacebookCommentReplyPanel({
                 </button>
               </div>
             ) : null}
-            <div className="flex items-end gap-2">
+            <div className="flex items-center gap-2">
               <AvatarWithInitials name={agentName} size={36} />
               <textarea
                 ref={composerRef}
