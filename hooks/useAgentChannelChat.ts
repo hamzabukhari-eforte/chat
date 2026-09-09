@@ -21,11 +21,12 @@ export function isLiveAgentInboxChannel(
 /** Agent inbox data layer (same UI, channel-specific APIs / WS). */
 export function useAgentChannelChat(
   channel: ChannelId,
-  currentUser: User | null,
+  /** Optional bootstrap until SES queue returns session `userId`. */
+  bootstrapUser: User | null = null,
 ) {
   const socialKey: SocialChannelKey = isLiveAgentInboxChannel(channel)
     ? channel
     : "whatsapp";
   const channelConfig = getSocialChannelConfig(socialKey);
-  return useWebSocketChat(currentUser, channelConfig);
+  return useWebSocketChat(bootstrapUser, channelConfig);
 }

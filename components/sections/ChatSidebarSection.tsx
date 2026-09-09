@@ -231,26 +231,43 @@ export function ChatSidebarSection({
                 ? formatTime(chat.lastMessage.createdAt)
                 : formatTime(chat.createdAt))
             }
-            renderRowMeta={(chat) =>
-              chat.lastAssignedAgent && chat.lastChatTime ? (
-                <div>
-                  <p className="text-[10px] text-gray-600 truncate">
-                    Last assigned to:{" "}
-                    <span className="font-medium text-gray-700">
-                      {" "}
-                      {chat.lastAssignedAgent ?? ""}
+            renderRowMeta={(chat) => {
+              const unread = chat.counts ?? 0;
+              const hasLastMeta = Boolean(
+                chat.lastAssignedAgent && chat.lastChatTime,
+              );
+              if (!hasLastMeta && unread <= 0) return null;
+              return (
+                <div className="flex items-center justify-between gap-2">
+                  {hasLastMeta ? (
+                    <div className="min-w-0 flex-1">
+                      <p className="truncate text-[10px] text-gray-600">
+                        Last assigned to:{" "}
+                        <span className="font-medium text-gray-700">
+                          {chat.lastAssignedAgent}
+                        </span>
+                      </p>
+                      <p className="truncate text-[10px] text-gray-600">
+                        Last chat time:{" "}
+                        <span className="font-medium text-gray-700">
+                          {chat.lastChatTime}
+                        </span>
+                      </p>
+                    </div>
+                  ) : (
+                    <div className="min-w-0 flex-1" />
+                  )}
+                  {unread > 0 ? (
+                    <span
+                      className="flex min-h-4.5 min-w-4.5 shrink-0 items-center justify-center rounded-full bg-red-500 px-1.5 text-[9px] font-semibold leading-none text-white"
+                      aria-label={`${unread} unread messages`}
+                    >
+                      {unreadBadgeLabel(unread)}
                     </span>
-                  </p>
-                  <p className="text-[10px] text-gray-600 truncate">
-                    Last chat time:{" "}
-                    <span className="font-medium text-gray-700">
-                      {" "}
-                      {chat.lastChatTime}
-                    </span>
-                  </p>
+                  ) : null}
                 </div>
-              ) : null
-            }
+              );
+            }}
           />
         ) : null}
 

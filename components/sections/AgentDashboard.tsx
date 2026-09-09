@@ -24,15 +24,23 @@ import { ChatSidebarSection } from "./ChatSidebarSection";
 import { ChatWindowSection } from "./ChatWindowSection";
 import { CustomerInfoSidebarSection } from "./CustomerInfoSidebarSection";
 import { FacebookPostsInboxSection } from "./FacebookPostsInboxSection";
+import { ensureNotificationSoundUnlockedOnGesture } from "@/lib/chat/notificationSound";
 import { AGENT_APP_HEADER_HEIGHT_VAR } from "@/lib/layout/agentAppLayout";
+import type { User } from "@/lib/chat/types";
 import { cn } from "@/lib/utils";
 
-
-const STATIC_AGENT = {
+/**
+ * Local-only fallback when SES queue has no `userId` (e.g. `next dev` without cookies).
+ * Production identity comes from `getQueueNAssignedChats` session.
+ */
+const DEV_AGENT_FALLBACK: User = {
   id: "mahnoor.z",
   name: "Mahnoor",
-  role: "agent" as const,
+  role: "agent",
 };
+
+const AGENT_BOOTSTRAP: User | null =
+  process.env.NODE_ENV === "development" ? DEV_AGENT_FALLBACK : null;
 
 function isBelowXlViewport(): boolean {
   if (typeof window === "undefined") return false;
@@ -77,7 +85,10 @@ function AgentDashboardContent({
   const agentHeaderMeasureRef = useRef<HTMLDivElement>(null);
   const [agentHeaderHeightPx, setAgentHeaderHeightPx] = useState(56);
 
-  const chat = useAgentChannelChat(activeChannel, STATIC_AGENT);
+  const chat = useAgentChannelChat(activeChannel, AGENT_BOOTSTRAP);
+  const agent = chat.currentAgent;
+  const agentId = agent?.id ?? "";
+  const agentName = agent?.name ?? "Agent";
 
   const belowXl = useSyncExternalStore(
     subscribeBelowXl,
@@ -95,6 +106,10 @@ function AgentDashboardContent({
     const ro = new ResizeObserver(measure);
     ro.observe(el);
     return () => ro.disconnect();
+  }, []);
+
+  useEffect(() => {
+    return ensureNotificationSoundUnlockedOnGesture();
   }, []);
 
   const handleToggleCustomerInfo = useCallback(() => {
@@ -165,7 +180,7 @@ function AgentDashboardContent({
     >
       <div ref={agentHeaderMeasureRef} className="shrink-0">
         <AgentAppHeader
-          agentName={STATIC_AGENT.name}
+          agentName={agentName}
           awayReasons={chat.awayReasons}
           preferInboxNavOnBack={belowXl && !showMobileInbox}
           onBackToInbox={handleBackToMobileInbox}
@@ -181,8 +196,8 @@ function AgentDashboardContent({
           <FacebookPostsInboxSection
             key={activeChannel}
             platform={activeChannel}
-            agentId={STATIC_AGENT.id}
-            agentName={STATIC_AGENT.name}
+            agentId={agentId || DEV_AGENT_FALLBACK.id}
+            agentName={agentName}
           />
         ) : isLiveAgentInboxChannel(activeChannel) ? (
         <>
@@ -228,7 +243,8 @@ function AgentDashboardContent({
               ticketDomains={chat.ticketDomains}
               ticketEmailTemplates={chat.ticketEmailTemplates}
               ticketSmsTemplates={chat.ticketSmsTemplates}
-              agentUserId={STATIC_AGENT.id}
+              agentUserId={agentId}
+              agentUserName={agentName}
               ticketDomainIndex={chat.domainIndex}
               ticketModuleIndex={chat.moduleIndex}
               onTransferToQueue={chat.transferToQueue}

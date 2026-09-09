@@ -527,15 +527,28 @@ function tryNormalizeNewMessage(raw: unknown): IncomingEvent | null {
         ? "agent"
         : "customer";
 
-  const assignTo = String(cd.chatAssignTo ?? "");
+  const assignTo = String(cd.chatAssignTo ?? "").trim();
+  const agentDisplayName = String(
+    md.AgentName ??
+      md.agentName ??
+      md.senderName ??
+      cd.AgentName ??
+      cd.agentName ??
+      assignTo ??
+      "",
+  ).trim();
   const customerKey = String(
     cd.customerNumber ?? cd.uniqueKey ?? "customer",
   );
 
   const senderId =
     senderRole === "agent"
-      ? (assignTo || "agent")
+      ? (assignTo || agentDisplayName || "agent")
       : customerKey;
+  const senderName =
+    senderRole === "agent"
+      ? agentDisplayName || assignTo || undefined
+      : undefined;
 
   const backendMessageId = pickBackendMessageId(md, o, cd);
   /** Attachment row keys: prefer SES message id; otherwise chatroom id only (no client UUIDs). */
@@ -570,6 +583,7 @@ function tryNormalizeNewMessage(raw: unknown): IncomingEvent | null {
     chatId,
     senderId,
     senderRole,
+    ...(senderName ? { senderName } : {}),
     text: displayText,
     createdAt,
     ...(backendMessageId ? { id: backendMessageId } : {}),

@@ -130,6 +130,11 @@ export interface Message {
   chatId: string;
   senderId: string;
   senderRole: Role;
+  /**
+   * Display name for the sender when known (e.g. agent `AgentName` from SES).
+   * UI shows "You" when this message is from the logged-in agent.
+   */
+  senderName?: string;
   text: string;
   /** ISO timestamp for ordering; may be derived when the server only sends a clock time. */
   createdAt: string;

@@ -10,7 +10,10 @@ import { ChatMessageAttachments } from "./ChatMessageAttachments";
 interface ChatMessageRowProps {
   message: Message;
   isAgent: boolean;
-  agentName: string;
+  /** Resolved label for agent bubble: "You" or the agent's name. */
+  agentDisplayName: string;
+  /** Name used for avatar initials (always the real agent name, never "You"). */
+  agentAvatarName: string;
   agentAvatar?: string;
   customerName: string;
   customerAvatar?: string;
@@ -21,7 +24,8 @@ interface ChatMessageRowProps {
 export function ChatMessageRow({
   message,
   isAgent,
-  agentName,
+  agentDisplayName,
+  agentAvatarName,
   agentAvatar,
   customerName,
   customerAvatar,
@@ -34,6 +38,9 @@ export function ChatMessageRow({
     return (
       <div className="flex gap-3 justify-end min-w-0">
         <div className="flex min-w-0 flex-1 flex-col items-end">
+          <p className="mb-0.5 max-w-[min(70vw,100%)] truncate px-1 text-[11px] font-medium text-gray-500">
+            {agentDisplayName}
+          </p>
           {message.attachments && message.attachments.length > 0 && (
             <ChatMessageAttachments
               attachments={message.attachments}
@@ -53,10 +60,10 @@ export function ChatMessageRow({
           </div>
         </div>
         <AvatarWithInitials
-          name={agentName}
+          name={agentAvatarName}
           src={agentAvatar}
           size={32}
-          alt={agentName}
+          alt={agentDisplayName}
         />
       </div>
     );

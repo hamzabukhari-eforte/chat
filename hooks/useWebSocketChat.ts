@@ -42,6 +42,7 @@ import {
   type SocialChannelChatConfig,
 } from "@/lib/agent/socialChannelConfig";
 import { SES_API_FETCH_CREDENTIALS } from "@/lib/agent/sesApiOrigin";
+import { playNewMessageNotificationSound } from "@/lib/chat/notificationSound";
 import { toast } from "sonner";
 
 /**
@@ -570,6 +571,67 @@ function inferSenderRole(row: LoadConversationApiRow): "agent" | "customer" {
   return "customer";
 }
 
+function pickNonEmptyString(...candidates: unknown[]): string | undefined {
+  for (const c of candidates) {
+    if (c === undefined || c === null) continue;
+    const s = String(c).trim();
+    if (
+      !s ||
+      s === "-" ||
+      s.toLowerCase() === "undefined" ||
+      s.toLowerCase() === "null"
+    ) {
+      continue;
+    }
+    return s;
+  }
+  return undefined;
+}
+
+/** Prefer SES agent identity from the row — not the viewing agent. */
+function resolveAgentSenderFromRow(
+  fields: Record<string, unknown>,
+  fallbackAgentUserId: string,
+): { senderId: string; senderName?: string } {
+  const senderName = pickNonEmptyString(
+    fields.AgentName,
+    fields.agentName,
+    fields.senderName,
+    fields.userName,
+    fields.chatAssignTo,
+    fields.assignedAgent,
+    fields.lastAssignedAgent,
+    fields.lastAssignedAgentName,
+    fields.messageBy,
+    fields.fromUser,
+    fields.agent,
+  );
+  const loginFromName = (() => {
+    if (!senderName) return undefined;
+    const dash = senderName.indexOf("-");
+    if (dash <= 0) return undefined;
+    const login = senderName.slice(0, dash).trim();
+    if (login.includes(".") || /^[a-z0-9._@]+$/i.test(login)) return login;
+    return undefined;
+  })();
+  const senderId = pickNonEmptyString(
+    fields.agentId,
+    fields.AgentId,
+    fields.Agentid,
+    fields.userId,
+    fields.UserId,
+    fields.senderId,
+    fields.assignedTo,
+    loginFromName,
+    fields.chatAssignTo,
+    senderName,
+  );
+  return {
+    senderId: senderId ?? fallbackAgentUserId,
+    ...(senderName ? { senderName } : {}),
+  };
+}
+
 function mapApiRowToMessage(
   row: LoadConversationApiRow,
   chatId: string,
@@ -615,12 +677,21 @@ function mapApiRowToMessage(
         ? parseMessageTime(headerTimeRaw)
         : new Date().toISOString();
   const senderRole = inferSenderRole(row);
+  const agentSender =
+    senderRole === "agent"
+      ? resolveAgentSenderFromRow(fields, agentUserId)
+      : null;
   const senderId =
-    typeof row.senderId === "string"
-      ? row.senderId
-      : senderRole === "agent"
-        ? agentUserId
+    typeof row.senderId === "string" && row.senderId.trim()
+      ? row.senderId.trim()
+      : agentSender
+        ? agentSender.senderId
         : customerId;
+  const senderName =
+    agentSender?.senderName ??
+    (senderRole === "customer"
+      ? pickNonEmptyString(fields.userName, fields.customerName, fields.name)
+      : undefined);
 
   const messageTimeRaw =
     headerTimeRaw ||
@@ -671,6 +742,7 @@ function mapApiRowToMessage(
     chatId,
     senderId,
     senderRole,
+    ...(senderName ? { senderName } : {}),
     text: displayText,
     createdAt,
     ...(messageTime ? { messageTime } : {}),
@@ -839,11 +911,79 @@ function sortMessagesChronologically(messages: Message[]): Message[] {
   });
 }
 
+/**
+ * Logged-in agent from SES `getQueueNAssignedChats` (session cookies → `userId`).
+ * Falls back to `fallbackAgent` when the payload has no user id (e.g. local dev).
+ */
+function resolveSessionAgentFromQueueResponse(
+  raw: unknown,
+  fallbackAgent: User | null,
+): User | null {
+  if (!raw || typeof raw !== "object" || Array.isArray(raw)) {
+    return fallbackAgent;
+  }
+  const o = raw as Record<string, unknown>;
+  const id = pickNonEmptyString(
+    o.userId,
+    o.Userid,
+    o.UserId,
+    o.userid,
+    o.agentId,
+    o.AgentId,
+  );
+  if (!id) return fallbackAgent;
+
+  let nameFromList: string | undefined;
+  const list = o.userList;
+  if (Array.isArray(list)) {
+    for (const row of list) {
+      if (!row || typeof row !== "object" || Array.isArray(row)) continue;
+      const r = row as Record<string, unknown>;
+      const rowId = pickNonEmptyString(r.id, r.userId, r.Userid);
+      const rowName = pickNonEmptyString(r.userName, r.name, r.agentName);
+      if (!rowId || !rowName) continue;
+      if (
+        rowId === id ||
+        rowId.toLowerCase() === id.toLowerCase() ||
+        rowName.toLowerCase() === id.toLowerCase()
+      ) {
+        nameFromList = rowName;
+        break;
+      }
+    }
+  } else if (list && typeof list === "object") {
+    const map = list as Record<string, unknown>;
+    const mapped = map[id] ?? map[String(id)];
+    nameFromList = pickNonEmptyString(mapped);
+  }
+
+  const name =
+    nameFromList ||
+    pickNonEmptyString(
+      o.userName,
+      o.agentName,
+      o.AgentName,
+      o.loginUser,
+      o.loginUserName,
+      o.name,
+      fallbackAgent?.name,
+    ) ||
+    id;
+
+  return {
+    id,
+    name,
+    role: "agent",
+    ...(fallbackAgent?.avatar ? { avatar: fallbackAgent.avatar } : {}),
+  };
+}
+
 async function fetchQueueAndAssignedChats(
   urls: SocialChannelApiUrls,
-  agent: User,
+  fallbackAgent: User | null,
 ): Promise<{
   chats: Chat[];
+  agent: User | null;
   initializer: BackendWsInitializer | null;
   domainIndex: number | null;
   moduleIndex: number | null;
@@ -864,6 +1004,7 @@ async function fetchQueueAndAssignedChats(
   }
   const raw: unknown = await res.json();
   const data = raw as QueueNAssignedChatsResponse;
+  const agent = resolveSessionAgentFromQueueResponse(raw, fallbackAgent);
   const transferAgents = extractTransferAgentsFromQueueResponse(raw);
   const ticketDomains = extractTicketDomainsFromQueueResponse(raw);
   const ticketEmailTemplates = extractTicketEmailTemplatesFromQueueResponse(raw);
@@ -873,15 +1014,20 @@ async function fetchQueueAndAssignedChats(
     mapQueueRowToChat(r, "queued"),
   );
   const assigned = (data.assignedChats ?? []).map((r) =>
-    mapQueueRowToChat(r, "assigned", agent),
+    mapQueueRowToChat(r, "assigned", agent ?? undefined),
   );
+  const initializerUserId = agent?.id
+    ? agent.id
+    : data.userId
+      ? String(data.userId).trim()
+      : "";
   const initializer =
-    data.userId &&
+    initializerUserId &&
     data.domainIndex !== undefined &&
     (data.chatFrom !== undefined || data.moduleIndex !== undefined)
       ? {
           chatroomId: "0" as const,
-          userId: String(data.userId),
+          userId: initializerUserId,
           type: "initializer" as const,
           From: "Agent" as const,
           domainIndex: Number(data.domainIndex),
@@ -893,6 +1039,7 @@ async function fetchQueueAndAssignedChats(
 
   return {
     chats: [...queue, ...assigned],
+    agent,
     initializer,
     domainIndex:
       data.domainIndex !== undefined ? Number(data.domainIndex) : null,
@@ -1139,6 +1286,87 @@ function chatRowExistsInState(chats: Chat[], chatId: string): boolean {
   );
 }
 
+function findChatRowInState(chats: Chat[], chatId: string): Chat | undefined {
+  const idStr = chatId.trim();
+  if (!idStr) return undefined;
+  return chats.find(
+    (c) =>
+      c.id === idStr ||
+      (c.whatsappChatIndex !== undefined &&
+        String(c.whatsappChatIndex) === idStr),
+  );
+}
+
+/** Dedup Strict Mode / duplicate WS deliveries for the same customer message. */
+const recentMyChatMessageToastAtMs = new Map<string, number>();
+
+function messageToastPreview(message: Message): string {
+  const text = stripSesPlaceholderCaption(
+    normalizeSesWireMessageText(message.text),
+    Boolean(message.attachments?.length),
+  )
+    .replace(/\s+/g, " ")
+    .trim();
+  if (text) return text.length > 80 ? `${text.slice(0, 79)}…` : text;
+  const first = message.attachments?.[0];
+  if (!first) return "New message";
+  if (first.type === "image") return "Sent an image";
+  if (first.type === "video") return "Sent a video";
+  if (first.type === "audio") return "Sent an audio message";
+  return first.name?.trim() || "Sent an attachment";
+}
+
+function isActiveChatForMessage(
+  chat: Chat,
+  messageChatId: string,
+  activeChatId: string | null,
+): boolean {
+  if (activeChatId == null) return false;
+  return (
+    activeChatId === chat.id ||
+    (chat.whatsappChatIndex !== undefined &&
+      String(chat.whatsappChatIndex) === String(activeChatId)) ||
+    String(activeChatId) === String(messageChatId)
+  );
+}
+
+/** Notify agent of a new customer message on one of their assigned chats. */
+function notifyNewMyChatCustomerMessage(opts: {
+  chat: Chat;
+  message: Message;
+  agentId: string | undefined;
+  activeChatId: string | null;
+}) {
+  const { chat, message, agentId, activeChatId } = opts;
+  if (!agentId) return;
+  if (message.system) return;
+  if (message.senderRole !== "customer") return;
+  if (chat.status === "queued") return;
+  if (chat.agent?.id !== agentId) return;
+
+  const dedupKey = `${stableMessageListKey(message)}:${message.chatId}`;
+  const nowMs = Date.now();
+  const lastAt = recentMyChatMessageToastAtMs.get(dedupKey) ?? 0;
+  if (nowMs - lastAt < 2500) return;
+  recentMyChatMessageToastAtMs.set(dedupKey, nowMs);
+
+  const viewingThisChat = isActiveChatForMessage(
+    chat,
+    message.chatId,
+    activeChatId,
+  );
+  // Open thread: message is already visible — no toast or sound.
+  if (viewingThisChat) return;
+
+  const customerName = chat.customer.name?.trim() || "Customer";
+  const preview = messageToastPreview(message);
+
+  queueMicrotask(() => {
+    playNewMessageNotificationSound();
+    toast.info(`${customerName}: ${preview}`);
+  });
+}
+
 function mergeChatsById(prev: Chat[], incoming: Chat[]): Chat[] {
   const map = new Map<string, Chat>();
   prev.forEach((c) => map.set(c.id, c));
@@ -1188,6 +1416,7 @@ function createOptimisticOutboundMessage(params: {
   chatId: string;
   senderId: string;
   senderRole: Role;
+  senderName?: string;
   text: string;
   attachments?: Attachment[];
   messageTime: string;
@@ -1201,6 +1430,9 @@ function createOptimisticOutboundMessage(params: {
     chatId: params.chatId,
     senderId: params.senderId,
     senderRole: params.senderRole,
+    ...(params.senderName?.trim()
+      ? { senderName: params.senderName.trim() }
+      : {}),
     text: params.text,
     createdAt: new Date().toISOString(),
     messageTime: params.messageTime,
@@ -1396,12 +1628,19 @@ async function sendFileChunksViaWebSocket(
 }
 
 export function useWebSocketChat(
-  currentUser: User | null,
+  bootstrapUser: User | null,
   channelConfig: SocialChannelChatConfig = WHATSAPP_SOCIAL_CHANNEL_CONFIG,
 ) {
   const [state, setState] = useState<State>(initialState);
+  /** Resolved from SES queue `userId` (session cookies); bootstrap is fallback only. */
+  const [sessionAgent, setSessionAgent] = useState<User | null>(bootstrapUser);
+  const currentUser = sessionAgent;
   const stateRef = useRef(state);
   stateRef.current = state;
+  const sessionAgentRef = useRef(sessionAgent);
+  sessionAgentRef.current = sessionAgent;
+  const bootstrapUserRef = useRef(bootstrapUser);
+  bootstrapUserRef.current = bootstrapUser;
   const transferToastDedupRef = useRef<Record<string, number>>({});
   /** Avoid overlapping `getTicketListByChatId` calls (e.g. Strict Mode or rapid toggles). */
   const ticketListFetchInFlightRef = useRef(false);
@@ -1420,6 +1659,7 @@ export function useWebSocketChat(
 
   useEffect(() => {
     setState(initialState);
+    setSessionAgent(bootstrapUserRef.current);
     ticketListFetchInFlightRef.current = false;
     queueFetchGenerationRef.current += 1;
   }, [channelConfig.key]);
@@ -1430,111 +1670,142 @@ export function useWebSocketChat(
       notifyAssignedUserName?: string;
       source?: "chat-transfer";
     }) => {
-      const agentId = currentUser?.id;
-      if (!agentId || currentUser.role !== "agent") return;
       const fetchGeneration = queueFetchGenerationRef.current;
-      Promise.allSettled([
-        fetchQueueAndAssignedChats(apiUrls, currentUser),
-        fetchAutoAssignmentStatus(apiUrls, currentUser.id),
-      ])
-        .then(([queueOutcome, autoOutcome]) => {
-          if (fetchGeneration !== queueFetchGenerationRef.current) return;
-          // Auto-assignment status drives sidebar layout independently of the
-          // queue API: if it succeeded, always honor its value even when the
-          // queue API failed, so showQueue isn't stuck on its initial default.
-          const autoStatusKnown = autoOutcome.status === "fulfilled";
-          const isAutoAssignmentEnabled = autoStatusKnown
-            ? autoOutcome.value
-            : false;
-          const showQueue = !isAutoAssignmentEnabled;
-
-          if (queueOutcome.status === "fulfilled") {
-            const result = queueOutcome.value;
-            client.setInitializer(result.initializer);
-            setState((prev) => {
-              const nextChats = result.chats;
-              const notifyAssignedChatId = opts?.notifyAssignedChatId;
-              if (notifyAssignedChatId && opts?.source === "chat-transfer") {
-                const wasMyChat = prev.chats.some(
-                  (c) =>
-                    c.id === notifyAssignedChatId &&
-                    c.status !== "queued" &&
-                    c.agent?.id === agentId,
-                );
-                const isNowMyChat = nextChats.some(
-                  (c) =>
-                    c.id === notifyAssignedChatId &&
-                    c.status !== "queued" &&
-                    c.agent?.id === agentId,
-                );
-                if (!wasMyChat && isNowMyChat) {
-                  const lastToastAtMs =
-                    transferToastDedupRef.current[notifyAssignedChatId] ?? 0;
-                  const nowMs = Date.now();
-                  if (nowMs - lastToastAtMs < 4000) {
-                    return {
-                      ...prev,
-                      chats: nextChats,
-                      showQueue,
-                      domainIndex: result.domainIndex ?? prev.domainIndex,
-                      moduleIndex: result.moduleIndex ?? prev.moduleIndex,
-                      chatFrom: result.chatFrom ?? prev.chatFrom,
-                      transferAgents: result.transferAgents,
-                      ticketDomains: result.ticketDomains,
-                      ticketEmailTemplates: result.ticketEmailTemplates,
-                      ticketSmsTemplates: result.ticketSmsTemplates,
-                      awayReasons: result.awayReasons,
-                    };
-                  }
-                  transferToastDedupRef.current[notifyAssignedChatId] = nowMs;
-                  const assignedUserNameRaw =
-                    opts.notifyAssignedUserName?.trim();
-                  const assignedUserName =
-                    assignedUserNameRaw &&
-                    assignedUserNameRaw.toLowerCase() !== "undefined" &&
-                    assignedUserNameRaw.toLowerCase() !== "null"
-                      ? assignedUserNameRaw
-                      : undefined;
-                  toast.success(
-                    assignedUserName
-                      ? `${assignedUserName}'s chat has been transferred to you.`
-                      : "A chat has been transferred to you.",
-                  );
-                }
-              }
-              return {
-                ...prev,
-                chats: nextChats,
-                showQueue,
-                domainIndex: result.domainIndex ?? prev.domainIndex,
-                moduleIndex: result.moduleIndex ?? prev.moduleIndex,
-                chatFrom: result.chatFrom ?? prev.chatFrom,
-                transferAgents: result.transferAgents,
-                ticketDomains: result.ticketDomains,
-                ticketEmailTemplates: result.ticketEmailTemplates,
-                ticketSmsTemplates: result.ticketSmsTemplates,
-                awayReasons: result.awayReasons,
-              };
-            });
-          } else if (autoStatusKnown) {
-            setState((prev) =>
-              prev.showQueue === showQueue ? prev : { ...prev, showQueue },
-            );
-          }
-        })
-        .finally(() => {
-          if (fetchGeneration !== queueFetchGenerationRef.current) return;
-          setState((prev) =>
-            prev.isInitialLoading ? { ...prev, isInitialLoading: false } : prev,
+      const fallbackAgent =
+        sessionAgentRef.current ?? bootstrapUserRef.current;
+      void (async () => {
+        let queueOutcome: Awaited<
+          ReturnType<typeof fetchQueueAndAssignedChats>
+        > | null = null;
+        try {
+          queueOutcome = await fetchQueueAndAssignedChats(
+            apiUrls,
+            fallbackAgent,
           );
-        });
+        } catch (e) {
+          console.error("[queue] getQueueNAssignedChats failed", e);
+        }
+        if (fetchGeneration !== queueFetchGenerationRef.current) return;
+
+        const resolvedAgent =
+          queueOutcome?.agent ?? sessionAgentRef.current ?? bootstrapUserRef.current;
+        if (resolvedAgent) {
+          setSessionAgent((prev) => {
+            if (
+              prev &&
+              prev.id === resolvedAgent.id &&
+              prev.name === resolvedAgent.name
+            ) {
+              return prev;
+            }
+            return resolvedAgent;
+          });
+        }
+
+        const agentId = resolvedAgent?.id;
+        let autoStatusKnown = false;
+        let isAutoAssignmentEnabled = false;
+        if (agentId) {
+          try {
+            isAutoAssignmentEnabled = await fetchAutoAssignmentStatus(
+              apiUrls,
+              agentId,
+            );
+            autoStatusKnown = true;
+          } catch (e) {
+            console.error("[queue] getAutoAssignmentStatus failed", e);
+          }
+        }
+        if (fetchGeneration !== queueFetchGenerationRef.current) return;
+
+        const showQueue = autoStatusKnown ? !isAutoAssignmentEnabled : true;
+
+        if (queueOutcome) {
+          const result = queueOutcome;
+          client.setInitializer(result.initializer);
+          setState((prev) => {
+            const nextChats = result.chats;
+            const notifyAssignedChatId = opts?.notifyAssignedChatId;
+            if (notifyAssignedChatId && opts?.source === "chat-transfer") {
+              const wasMyChat = prev.chats.some(
+                (c) =>
+                  c.id === notifyAssignedChatId &&
+                  c.status !== "queued" &&
+                  c.agent?.id === agentId,
+              );
+              const isNowMyChat = nextChats.some(
+                (c) =>
+                  c.id === notifyAssignedChatId &&
+                  c.status !== "queued" &&
+                  c.agent?.id === agentId,
+              );
+              if (!wasMyChat && isNowMyChat) {
+                const lastToastAtMs =
+                  transferToastDedupRef.current[notifyAssignedChatId] ?? 0;
+                const nowMs = Date.now();
+                if (nowMs - lastToastAtMs < 4000) {
+                  return {
+                    ...prev,
+                    chats: nextChats,
+                    showQueue,
+                    domainIndex: result.domainIndex ?? prev.domainIndex,
+                    moduleIndex: result.moduleIndex ?? prev.moduleIndex,
+                    chatFrom: result.chatFrom ?? prev.chatFrom,
+                    transferAgents: result.transferAgents,
+                    ticketDomains: result.ticketDomains,
+                    ticketEmailTemplates: result.ticketEmailTemplates,
+                    ticketSmsTemplates: result.ticketSmsTemplates,
+                    awayReasons: result.awayReasons,
+                  };
+                }
+                transferToastDedupRef.current[notifyAssignedChatId] = nowMs;
+                const assignedUserNameRaw =
+                  opts.notifyAssignedUserName?.trim();
+                const assignedUserName =
+                  assignedUserNameRaw &&
+                  assignedUserNameRaw.toLowerCase() !== "undefined" &&
+                  assignedUserNameRaw.toLowerCase() !== "null"
+                    ? assignedUserNameRaw
+                    : undefined;
+                toast.success(
+                  assignedUserName
+                    ? `${assignedUserName}'s chat has been transferred to you.`
+                    : "A chat has been transferred to you.",
+                );
+              }
+            }
+            return {
+              ...prev,
+              chats: nextChats,
+              showQueue,
+              domainIndex: result.domainIndex ?? prev.domainIndex,
+              moduleIndex: result.moduleIndex ?? prev.moduleIndex,
+              chatFrom: result.chatFrom ?? prev.chatFrom,
+              transferAgents: result.transferAgents,
+              ticketDomains: result.ticketDomains,
+              ticketEmailTemplates: result.ticketEmailTemplates,
+              ticketSmsTemplates: result.ticketSmsTemplates,
+              awayReasons: result.awayReasons,
+            };
+          });
+        } else if (autoStatusKnown) {
+          setState((prev) =>
+            prev.showQueue === showQueue ? prev : { ...prev, showQueue },
+          );
+        }
+      })().finally(() => {
+        if (fetchGeneration !== queueFetchGenerationRef.current) return;
+        setState((prev) =>
+          prev.isInitialLoading ? { ...prev, isInitialLoading: false } : prev,
+        );
+      });
     },
-    [apiUrls, client, currentUser],
+    [apiUrls, client],
   );
 
   useEffect(() => {
     refreshAgentChatsFromApi();
-  }, [refreshAgentChatsFromApi]);
+  }, [refreshAgentChatsFromApi, channelConfig.key]);
 
   useEffect(() => {
     const userId = currentUser?.id;
@@ -1718,15 +1989,55 @@ export function useWebSocketChat(
               echoWithClientTime,
               prev.pendingSeenByMsgId,
             );
+            const chatForToast = findChatRowInState(
+              prev.chats,
+              applied.message.chatId,
+            );
+            if (chatForToast) {
+              notifyNewMyChatCustomerMessage({
+                chat: chatForToast,
+                message: applied.message,
+                agentId: userId,
+                activeChatId: prev.activeChatId,
+              });
+            }
             return {
               ...prev,
               messages: [...withoutMatchingOptimistic, applied.message],
               pendingSeenByMsgId: applied.pending,
-              chats: prev.chats.map((c) =>
-                c.id === applied.message.chatId
-                  ? { ...c, lastMessage: applied.message }
-                  : c,
-              ),
+              chats: prev.chats.map((c) => {
+                const matchesRow =
+                  c.id === applied.message.chatId ||
+                  (c.whatsappChatIndex !== undefined &&
+                    String(c.whatsappChatIndex) ===
+                      String(applied.message.chatId));
+                if (!matchesRow) return c;
+
+                const isOpen =
+                  prev.activeChatId != null &&
+                  (prev.activeChatId === c.id ||
+                    String(prev.activeChatId) ===
+                      String(applied.message.chatId) ||
+                    (c.whatsappChatIndex !== undefined &&
+                      String(c.whatsappChatIndex) ===
+                        String(prev.activeChatId)));
+
+                const bumpUnread =
+                  applied.message.senderRole === "customer" &&
+                  !applied.message.system &&
+                  c.status !== "queued" &&
+                  Boolean(userId) &&
+                  c.agent?.id === userId &&
+                  !isOpen;
+
+                return {
+                  ...c,
+                  lastMessage: applied.message,
+                  ...(bumpUnread
+                    ? { counts: Math.max(0, (c.counts ?? 0) + 1) }
+                    : {}),
+                };
+              }),
             };
           }
           case "chat-updated": {
@@ -2095,6 +2406,7 @@ export function useWebSocketChat(
           chatId: state.activeChatId,
           senderId: currentUser.id,
           senderRole: "agent",
+          senderName: currentUser.name,
           text: text.trim(),
           attachments: hasAttachment ? attachments : undefined,
           messageTime,
@@ -2136,6 +2448,7 @@ export function useWebSocketChat(
         chatId: state.activeChatId,
         senderId: currentUser.id,
         senderRole: "agent",
+        senderName: currentUser.name,
         text: t,
         attachments,
         messageTime,
@@ -2562,6 +2875,8 @@ export function useWebSocketChat(
   return {
     channelKey: channelConfig.key,
     createTicketReviewUrl: apiUrls.createTicketReviewByChatId,
+    /** Logged-in agent from SES session (`userId`); null until queue loads / fallback. */
+    currentAgent: currentUser,
     chats: state.chats,
     messages: state.messages,
     queue,

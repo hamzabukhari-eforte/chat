@@ -10,7 +10,7 @@ const hoursAgo = (n: number) =>
 const daysAgo = (n: number) =>
   new Date(Date.now() - n * 86_400_000).toISOString();
 
-/** Current demo agent id — matches `STATIC_AGENT` in AgentDashboard. */
+/** Demo agent id for placeholder Instagram comments (not live SES session). */
 export const DEMO_INSTAGRAM_AGENT_ID = "mahnoor.z";
 export const DEMO_INSTAGRAM_AGENT_NAME = "Mahnoor";
 const OTHER_AGENT = { agentId: "ali.k", agentName: "Ali Khan" };

@@ -66,6 +66,8 @@ interface Props {
   ticketSmsTemplates?: { id: string; name: string }[];
   /** Logged-in agent id for ticket / SES register-complaint calls. */
   agentUserId: string;
+  /** Logged-in agent display name — used to show "You" on own messages. */
+  agentUserName: string;
   /** SES context required by ticket review submit API. */
   ticketDomainIndex?: number | null;
   /** SES context required by ticket review submit API. */
@@ -87,6 +89,99 @@ function dateSeparatorLabelFromMessage(message: Message): string {
   return formatChatDateSeparatorLabel(message.createdAt);
 }
 
+function normId(v: string | undefined | null): string {
+  return String(v ?? "")
+    .trim()
+    .toLowerCase();
+}
+
+/** SES often sends `loginId-Display Name` (e.g. `mahnoor.z-Mahnoor`). */
+function humanizeAgentLabel(raw: string): string {
+  const s = raw.trim();
+  if (!s) return "";
+  const dash = s.indexOf("-");
+  if (dash > 0 && dash < s.length - 1) {
+    const login = s.slice(0, dash).trim();
+    const display = s.slice(dash + 1).trim();
+    if (
+      display &&
+      (login.includes(".") || /^[a-z0-9._@]+$/i.test(login))
+    ) {
+      return display;
+    }
+  }
+  return s;
+}
+
+function identityTokens(raw: string): string[] {
+  const n = normId(raw);
+  if (!n || n === "agent" || n === "you") return [];
+  const out = new Set<string>([n]);
+  for (const part of n.split(/[-_/|]+/)) {
+    const p = part.trim();
+    if (p.length >= 2) out.add(p);
+  }
+  return [...out];
+}
+
+function identitiesMatch(a: string, b: string): boolean {
+  const na = normId(a);
+  const nb = normId(b);
+  if (!na || !nb) return false;
+  if (na === nb) return true;
+  const ta = identityTokens(a);
+  const tb = identityTokens(b);
+  return ta.some((t) => tb.includes(t));
+}
+
+function isMessageFromCurrentAgent(
+  message: Message,
+  currentAgentId: string,
+  currentAgentName: string,
+): boolean {
+  const me = [currentAgentId, currentAgentName].filter((s) => s?.trim());
+  const theirs = [message.senderId, message.senderName].filter((s) =>
+    Boolean(s?.trim()),
+  );
+  if (me.length === 0 || theirs.length === 0) return false;
+  return theirs.some((t) => me.some((m) => identitiesMatch(t!, m)));
+}
+
+/** Own agent messages → "You"; otherwise the message's agent name (or chat assignee). */
+function agentPresentationForMessage(
+  message: Message,
+  currentAgentId: string,
+  currentAgentName: string,
+  chatAgentName: string,
+): { label: string; avatarName: string } {
+  const rawFromMessage =
+    message.senderName?.trim() ||
+    (message.senderId &&
+    message.senderId !== "agent" &&
+    message.senderId !== currentAgentId
+      ? message.senderId.trim()
+      : "") ||
+    "";
+  const humanFromMessage = humanizeAgentLabel(rawFromMessage);
+  const fallbackName =
+    humanFromMessage ||
+    currentAgentName.trim() ||
+    chatAgentName.trim() ||
+    "Agent";
+
+  if (isMessageFromCurrentAgent(message, currentAgentId, currentAgentName)) {
+    return {
+      label: "You",
+      avatarName: currentAgentName.trim() || fallbackName,
+    };
+  }
+
+  return {
+    label: fallbackName,
+    avatarName: fallbackName,
+  };
+}
+
 export function ChatWindowSection({
   activeChat,
   messages,
@@ -102,6 +197,7 @@ export function ChatWindowSection({
   ticketEmailTemplates = [],
   ticketSmsTemplates = [],
   agentUserId,
+  agentUserName,
   ticketDomainIndex,
   ticketModuleIndex,
   ticketList,
@@ -391,7 +487,10 @@ export function ChatWindowSection({
   }
 
   const customerName = activeChat.customer.name;
-  const agentName = activeChat.agent?.name ?? "Agent";
+  const chatAgentName =
+    activeChat.agent?.name?.trim() ||
+    activeChat.lastAssignedAgent?.trim() ||
+    "Agent";
 
   const sortedMessages = [...messages].sort(
     (a, b) => new Date(a.createdAt).getTime() - new Date(b.createdAt).getTime(),
@@ -484,7 +583,23 @@ export function ChatWindowSection({
               <ChatMessageRow
                 message={message}
                 isAgent={isAgent}
-                agentName={agentName}
+                {...(isAgent
+                  ? (() => {
+                      const presentation = agentPresentationForMessage(
+                        message,
+                        agentUserId,
+                        agentUserName,
+                        chatAgentName,
+                      );
+                      return {
+                        agentDisplayName: presentation.label,
+                        agentAvatarName: presentation.avatarName,
+                      };
+                    })()
+                  : {
+                      agentDisplayName: chatAgentName,
+                      agentAvatarName: chatAgentName,
+                    })}
                 agentAvatar={activeChat.agent?.avatar}
                 customerName={customerName}
                 customerAvatar={activeChat.customer.avatar}
