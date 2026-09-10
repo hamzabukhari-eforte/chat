@@ -423,13 +423,6 @@ function tryNormalizeNewMessageCount(raw: unknown): IncomingEvent | null {
     o.data && typeof o.data === "object" && !Array.isArray(o.data)
       ? (o.data as Record<string, unknown>)
       : null;
-  if (!data) return null;
-
-  const chatIdRaw =
-    data.chatId ?? data.chatroomId ?? data.chatIndex ?? data.ChatId;
-  if (chatIdRaw === undefined || chatIdRaw === null) return null;
-  const chatId = String(chatIdRaw).trim();
-  if (!chatId) return null;
 
   const toOptionalNumber = (v: unknown): number | undefined => {
     if (v === undefined || v === null || String(v).trim() === "") return undefined;
@@ -437,16 +430,40 @@ function tryNormalizeNewMessageCount(raw: unknown): IncomingEvent | null {
     return Number.isFinite(n) ? Math.trunc(n) : undefined;
   };
 
+  const chatIdRaw =
+    data?.chatId ??
+    data?.chatroomId ??
+    data?.chatIndex ??
+    data?.ChatId ??
+    o.chatId ??
+    o.chatroomId ??
+    o.chatIndex ??
+    o.ChatId;
+  if (chatIdRaw === undefined || chatIdRaw === null) return null;
+  const chatId = String(chatIdRaw).trim();
+  if (!chatId) return null;
+
   const countsRaw =
-    data.counts ?? data.count ?? data.unreadCount ?? data.unread_count;
+    data?.counts ??
+    data?.count ??
+    data?.unreadCount ??
+    data?.unread_count ??
+    o.counts ??
+    o.count ??
+    o.unreadCount ??
+    o.unread_count;
   const counts = toOptionalNumber(countsRaw);
 
   return {
     type: "new-message-count",
     payload: {
       chatId,
-      domainIndex: toOptionalNumber(data.domainIndex ?? data.DomainIndex),
-      chatFrom: toOptionalNumber(data.chatFrom ?? data.ChatFrom),
+      domainIndex: toOptionalNumber(
+        data?.domainIndex ?? data?.DomainIndex ?? o.domainIndex ?? o.DomainIndex,
+      ),
+      chatFrom: toOptionalNumber(
+        data?.chatFrom ?? data?.ChatFrom ?? o.chatFrom ?? o.ChatFrom,
+      ),
       ...(counts !== undefined && counts >= 0 ? { counts } : {}),
     },
   };

@@ -462,6 +462,15 @@ function mapNewChatInQueueDataToChat(data: Record<string, unknown>): Chat | null
   const lastChatTime = String(data.lastChatTime ?? "").trim();
   const lastMsg =
     String(data.lastMsg ?? "").trim() || lastChatTime;
+  const countsRaw = data.counts ?? data.count ?? data.unreadCount ?? data.unread_count;
+  const countsNum = Number(countsRaw);
+  const counts =
+    countsRaw !== undefined &&
+    countsRaw !== null &&
+    String(countsRaw).trim() !== "" &&
+    Number.isFinite(countsNum)
+      ? Math.max(0, Math.trunc(countsNum))
+      : undefined;
   const row: QueueNAssignedRow = {
     number: String(data.number ?? ""),
     messageTime: String(data.messageTime ?? ""),
@@ -478,6 +487,7 @@ function mapNewChatInQueueDataToChat(data: Record<string, unknown>): Chat | null
       data.lastAssignedAgent ?? data.lastAssignedAgentName,
     ),
     ...(lastChatTime !== "" ? { lastChatTime } : {}),
+    ...(counts !== undefined ? { counts } : {}),
   };
   return mapQueueRowToChat(row, "queued");
 }
@@ -2025,10 +2035,9 @@ export function useWebSocketChat(
                 const bumpUnread =
                   applied.message.senderRole === "customer" &&
                   !applied.message.system &&
-                  c.status !== "queued" &&
-                  Boolean(userId) &&
-                  c.agent?.id === userId &&
-                  !isOpen;
+                  !isOpen &&
+                  (c.status === "queued" ||
+                    (Boolean(userId) && c.agent?.id === userId));
 
                 return {
                   ...c,
@@ -2083,10 +2092,22 @@ export function useWebSocketChat(
             }
             const incoming = mapNewChatInQueueDataToChat(event.payload.data);
             if (!incoming) return prev;
-            const existing = prev.chats.find((c) => c.id === incoming.id);
+            const existing = prev.chats.find(
+              (c) =>
+                c.id === incoming.id ||
+                (c.whatsappChatIndex !== undefined &&
+                  incoming.whatsappChatIndex !== undefined &&
+                  String(c.whatsappChatIndex) ===
+                    String(incoming.whatsappChatIndex)),
+            );
             const chat: Chat = {
               ...incoming,
               lastMessage: incoming.lastMessage ?? existing?.lastMessage,
+              // Prefer socket count when present; otherwise keep existing badge.
+              counts:
+                incoming.counts !== undefined
+                  ? incoming.counts
+                  : existing?.counts,
             };
             return {
               ...prev,
@@ -2156,14 +2177,23 @@ export function useWebSocketChat(
               return prev;
             }
 
-            if (prev.activeChatId === idStr) return prev;
-
             const matchesRow = (c: Chat) =>
               c.id === idStr ||
               (c.whatsappChatIndex !== undefined &&
                 String(c.whatsappChatIndex) === idStr);
 
-            if (!prev.chats.some(matchesRow)) return prev;
+            const matchedChat = prev.chats.find(matchesRow);
+            if (!matchedChat) return prev;
+
+            // Skip only when this exact chat is open in the conversation pane.
+            const isOpen =
+              prev.activeChatId != null &&
+              (prev.activeChatId === matchedChat.id ||
+                String(prev.activeChatId) === idStr ||
+                (matchedChat.whatsappChatIndex !== undefined &&
+                  String(matchedChat.whatsappChatIndex) ===
+                    String(prev.activeChatId)));
+            if (isOpen) return prev;
 
             return {
               ...prev,
