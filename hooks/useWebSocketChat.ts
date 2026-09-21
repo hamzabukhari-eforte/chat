@@ -923,14 +923,11 @@ function sortMessagesChronologically(messages: Message[]): Message[] {
 
 /**
  * Logged-in agent from SES `getQueueNAssignedChats` (session cookies → `userId`).
- * Falls back to `fallbackAgent` when the payload has no user id (e.g. local dev).
+ * Returns `null` when the payload has no session user — no synthetic fallback.
  */
-function resolveSessionAgentFromQueueResponse(
-  raw: unknown,
-  fallbackAgent: User | null,
-): User | null {
+function resolveSessionAgentFromQueueResponse(raw: unknown): User | null {
   if (!raw || typeof raw !== "object" || Array.isArray(raw)) {
-    return fallbackAgent;
+    return null;
   }
   const o = raw as Record<string, unknown>;
   const id = pickNonEmptyString(
@@ -941,7 +938,7 @@ function resolveSessionAgentFromQueueResponse(
     o.agentId,
     o.AgentId,
   );
-  if (!id) return fallbackAgent;
+  if (!id) return null;
 
   let nameFromList: string | undefined;
   const list = o.userList;
@@ -976,7 +973,6 @@ function resolveSessionAgentFromQueueResponse(
       o.loginUser,
       o.loginUserName,
       o.name,
-      fallbackAgent?.name,
     ) ||
     id;
 
@@ -984,13 +980,11 @@ function resolveSessionAgentFromQueueResponse(
     id,
     name,
     role: "agent",
-    ...(fallbackAgent?.avatar ? { avatar: fallbackAgent.avatar } : {}),
   };
 }
 
 async function fetchQueueAndAssignedChats(
   urls: SocialChannelApiUrls,
-  fallbackAgent: User | null,
 ): Promise<{
   chats: Chat[];
   agent: User | null;
@@ -1014,7 +1008,7 @@ async function fetchQueueAndAssignedChats(
   }
   const raw: unknown = await res.json();
   const data = raw as QueueNAssignedChatsResponse;
-  const agent = resolveSessionAgentFromQueueResponse(raw, fallbackAgent);
+  const agent = resolveSessionAgentFromQueueResponse(raw);
   const transferAgents = extractTransferAgentsFromQueueResponse(raw);
   const ticketDomains = extractTicketDomainsFromQueueResponse(raw);
   const ticketEmailTemplates = extractTicketEmailTemplatesFromQueueResponse(raw);
@@ -1026,11 +1020,7 @@ async function fetchQueueAndAssignedChats(
   const assigned = (data.assignedChats ?? []).map((r) =>
     mapQueueRowToChat(r, "assigned", agent ?? undefined),
   );
-  const initializerUserId = agent?.id
-    ? agent.id
-    : data.userId
-      ? String(data.userId).trim()
-      : "";
+  const initializerUserId = agent?.id ?? "";
   const initializer =
     initializerUserId &&
     data.domainIndex !== undefined &&
@@ -1638,19 +1628,25 @@ async function sendFileChunksViaWebSocket(
 }
 
 export function useWebSocketChat(
-  bootstrapUser: User | null,
+  /** Customer bootstrap only. Agents resolve from SES session — never invent a fallback. */
+  initialUser: User | null = null,
   channelConfig: SocialChannelChatConfig = WHATSAPP_SOCIAL_CHANNEL_CONFIG,
 ) {
   const [state, setState] = useState<State>(initialState);
-  /** Resolved from SES queue `userId` (session cookies); bootstrap is fallback only. */
-  const [sessionAgent, setSessionAgent] = useState<User | null>(bootstrapUser);
+  /**
+   * Customers: seeded from `initialUser`.
+   * Agents: SES queue `userId` only — stays null when the session user is missing.
+   */
+  const [sessionAgent, setSessionAgent] = useState<User | null>(() =>
+    initialUser?.role === "customer" ? initialUser : null,
+  );
   const currentUser = sessionAgent;
   const stateRef = useRef(state);
   stateRef.current = state;
   const sessionAgentRef = useRef(sessionAgent);
   sessionAgentRef.current = sessionAgent;
-  const bootstrapUserRef = useRef(bootstrapUser);
-  bootstrapUserRef.current = bootstrapUser;
+  const initialUserRef = useRef(initialUser);
+  initialUserRef.current = initialUser;
   const transferToastDedupRef = useRef<Record<string, number>>({});
   /** Avoid overlapping `getTicketListByChatId` calls (e.g. Strict Mode or rapid toggles). */
   const ticketListFetchInFlightRef = useRef(false);
@@ -1669,7 +1665,8 @@ export function useWebSocketChat(
 
   useEffect(() => {
     setState(initialState);
-    setSessionAgent(bootstrapUserRef.current);
+    const seed = initialUserRef.current;
+    setSessionAgent(seed?.role === "customer" ? seed : null);
     ticketListFetchInFlightRef.current = false;
     queueFetchGenerationRef.current += 1;
   }, [channelConfig.key]);
@@ -1681,37 +1678,41 @@ export function useWebSocketChat(
       source?: "chat-transfer";
     }) => {
       const fetchGeneration = queueFetchGenerationRef.current;
-      const fallbackAgent =
-        sessionAgentRef.current ?? bootstrapUserRef.current;
       void (async () => {
         let queueOutcome: Awaited<
           ReturnType<typeof fetchQueueAndAssignedChats>
         > | null = null;
         try {
-          queueOutcome = await fetchQueueAndAssignedChats(
-            apiUrls,
-            fallbackAgent,
-          );
+          queueOutcome = await fetchQueueAndAssignedChats(apiUrls);
         } catch (e) {
           console.error("[queue] getQueueNAssignedChats failed", e);
         }
         if (fetchGeneration !== queueFetchGenerationRef.current) return;
 
-        const resolvedAgent =
-          queueOutcome?.agent ?? sessionAgentRef.current ?? bootstrapUserRef.current;
-        if (resolvedAgent) {
+        const seededCustomer =
+          initialUserRef.current?.role === "customer"
+            ? initialUserRef.current
+            : null;
+
+        if (queueOutcome && !seededCustomer) {
+          const nextAgent = queueOutcome.agent;
           setSessionAgent((prev) => {
+            if (!nextAgent) return null;
             if (
               prev &&
-              prev.id === resolvedAgent.id &&
-              prev.name === resolvedAgent.name
+              prev.id === nextAgent.id &&
+              prev.name === nextAgent.name
             ) {
               return prev;
             }
-            return resolvedAgent;
+            return nextAgent;
           });
         }
 
+        const resolvedAgent =
+          seededCustomer ??
+          queueOutcome?.agent ??
+          sessionAgentRef.current;
         const agentId = resolvedAgent?.id;
         let autoStatusKnown = false;
         let isAutoAssignmentEnabled = false;

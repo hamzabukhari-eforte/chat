@@ -32,7 +32,7 @@ export const chatsPerDay = [
 ] as const;
 
 export const chatsByAgent = [
-  { agent: "Mahnoor", assigned: 34, resolved: 28 },
+  { agent: "Ayesha", assigned: 34, resolved: 28 },
   { agent: "Ali", assigned: 29, resolved: 25 },
   { agent: "Sara", assigned: 31, resolved: 27 },
   { agent: "Omar", assigned: 22, resolved: 19 },
@@ -66,7 +66,7 @@ export const dummyAssignedChats: AssignedChatRow[] = [
   {
     id: "a-501",
     customer: "Imran Qureshi",
-    agent: "Mahnoor",
+    agent: "Ayesha",
     channel: "WhatsApp",
     status: "active",
   },

@@ -10,9 +10,9 @@ const hoursAgo = (n: number) =>
 const daysAgo = (n: number) =>
   new Date(Date.now() - n * 86_400_000).toISOString();
 
-/** Demo agent id for placeholder Instagram comments (not live SES session). */
-export const DEMO_INSTAGRAM_AGENT_ID = "mahnoor.z";
-export const DEMO_INSTAGRAM_AGENT_NAME = "Mahnoor";
+/** Placeholder agent for dummy Instagram threads (not a real SES login). */
+export const DEMO_INSTAGRAM_AGENT_ID = "demo.agent";
+export const DEMO_INSTAGRAM_AGENT_NAME = "Demo Agent";
 const OTHER_AGENT = { agentId: "ali.k", agentName: "Ali Khan" };
 
 function thread(items: FacebookThreadReply[]): FacebookThreadReply[] {

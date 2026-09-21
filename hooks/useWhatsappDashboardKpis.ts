@@ -16,7 +16,7 @@ export type UseWhatsappDashboardKpisState = {
  * Auth uses session cookies (`credentials: "include"`).
  */
 export function useWhatsappDashboardKpis(
-  supervisorUserId: string,
+  supervisorUserId?: string,
 ): UseWhatsappDashboardKpisState {
   const [data, setData] = useState<WhatsappDashboardKpis | null>(null);
   const [loading, setLoading] = useState(true);

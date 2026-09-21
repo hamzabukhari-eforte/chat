@@ -246,7 +246,7 @@ export function parseWhatsappDashboardKpis(json: unknown): WhatsappDashboardKpis
  * POST dashboard KPIs. Auth via session cookies (`credentials: "include"`).
  */
 export async function postWhatsappDashboardKpis(
-  _supervisorUserId: string,
+  _supervisorUserId?: string,
   body: Record<string, unknown> = {},
 ): Promise<WhatsappDashboardKpis> {
   const url = new URL(getWhatsappDashboardUrl());

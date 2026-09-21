@@ -26,21 +26,7 @@ import { CustomerInfoSidebarSection } from "./CustomerInfoSidebarSection";
 import { FacebookPostsInboxSection } from "./FacebookPostsInboxSection";
 import { ensureNotificationSoundUnlockedOnGesture } from "@/lib/chat/notificationSound";
 import { AGENT_APP_HEADER_HEIGHT_VAR } from "@/lib/layout/agentAppLayout";
-import type { User } from "@/lib/chat/types";
 import { cn } from "@/lib/utils";
-
-/**
- * Local-only fallback when SES queue has no `userId` (e.g. `next dev` without cookies).
- * Production identity comes from `getQueueNAssignedChats` session.
- */
-const DEV_AGENT_FALLBACK: User = {
-  id: "mahnoor.z",
-  name: "Mahnoor",
-  role: "agent",
-};
-
-const AGENT_BOOTSTRAP: User | null =
-  process.env.NODE_ENV === "development" ? DEV_AGENT_FALLBACK : null;
 
 function isBelowXlViewport(): boolean {
   if (typeof window === "undefined") return false;
@@ -85,10 +71,10 @@ function AgentDashboardContent({
   const agentHeaderMeasureRef = useRef<HTMLDivElement>(null);
   const [agentHeaderHeightPx, setAgentHeaderHeightPx] = useState(56);
 
-  const chat = useAgentChannelChat(activeChannel, AGENT_BOOTSTRAP);
+  const chat = useAgentChannelChat(activeChannel);
   const agent = chat.currentAgent;
   const agentId = agent?.id ?? "";
-  const agentName = agent?.name ?? "Agent";
+  const agentName = agent?.name?.trim() || "";
 
   const belowXl = useSyncExternalStore(
     subscribeBelowXl,
@@ -196,7 +182,7 @@ function AgentDashboardContent({
           <FacebookPostsInboxSection
             key={activeChannel}
             platform={activeChannel}
-            agentId={agentId || DEV_AGENT_FALLBACK.id}
+            agentId={agentId}
             agentName={agentName}
           />
         ) : isLiveAgentInboxChannel(activeChannel) ? (

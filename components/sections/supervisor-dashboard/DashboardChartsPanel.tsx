@@ -18,7 +18,6 @@ import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/com
 import { useWhatsappDashboardKpis } from "@/hooks/useWhatsappDashboardKpis";
 import { cn } from "@/lib/utils";
 import { chatsByAgent, chatsPerDay, volumeLast24Hours } from "@/lib/dashboard/dummyData";
-import { STATIC_SUPERVISOR } from "@/lib/supervisor/staticSupervisor";
 
 type StatAccent =
   | "slate"
@@ -64,7 +63,7 @@ const tooltipProps = {
 } as const;
 
 export function DashboardChartsPanel({
-  supervisorUserId = STATIC_SUPERVISOR.id,
+  supervisorUserId,
 }: {
   /** Reserved for future auth; KPIs use session cookies. */
   supervisorUserId?: string;

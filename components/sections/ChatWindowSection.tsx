@@ -95,7 +95,7 @@ function normId(v: string | undefined | null): string {
     .toLowerCase();
 }
 
-/** SES often sends `loginId-Display Name` (e.g. `mahnoor.z-Mahnoor`). */
+/** SES often sends `loginId-Display Name` (e.g. `agent.id-Display Name`). */
 function humanizeAgentLabel(raw: string): string {
   const s = raw.trim();
   if (!s) return "";

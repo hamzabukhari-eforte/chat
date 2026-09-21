@@ -5,7 +5,6 @@ import {
   getSocialChannelConfig,
   type SocialChannelKey,
 } from "@/lib/agent/socialChannelConfig";
-import type { User } from "@/lib/chat/types";
 import { useWebSocketChat } from "./useWebSocketChat";
 
 export function isLiveAgentInboxChannel(
@@ -19,14 +18,10 @@ export function isLiveAgentInboxChannel(
 }
 
 /** Agent inbox data layer (same UI, channel-specific APIs / WS). */
-export function useAgentChannelChat(
-  channel: ChannelId,
-  /** Optional bootstrap until SES queue returns session `userId`. */
-  bootstrapUser: User | null = null,
-) {
+export function useAgentChannelChat(channel: ChannelId) {
   const socialKey: SocialChannelKey = isLiveAgentInboxChannel(channel)
     ? channel
     : "whatsapp";
   const channelConfig = getSocialChannelConfig(socialKey);
-  return useWebSocketChat(bootstrapUser, channelConfig);
+  return useWebSocketChat(null, channelConfig);
 }
