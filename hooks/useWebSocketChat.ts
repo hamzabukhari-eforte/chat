@@ -6,6 +6,8 @@ import {
   createdAtFromMessageHeaderAndTime,
   formatMessageTimeForDisplay,
   formatSesLocalMessageTime,
+  formatSidebarChatListTime,
+  parseSesDateTimeToDate,
   splitSesMessageHeader,
 } from "../lib/chat/sesMessageTime";
 import { parseSesSeenStatusFromFields } from "../lib/chat/sesChatSeenStatus";
@@ -340,32 +342,8 @@ interface BackendWsInitializer {
 }
 
 function parseMessageTime(raw: string | null | undefined): string {
-  const trimmed = String(raw ?? "").trim();
-  const direct = new Date(trimmed);
-  if (!Number.isNaN(direct.getTime())) return direct.toISOString();
-
-  const ampm = /^(\d{1,2}):(\d{2})(?::(\d{2}))?\s*(AM|PM)$/i.exec(trimmed);
-  if (ampm) {
-    let h = Number(ampm[1]);
-    const min = Number(ampm[2]);
-    const sec = ampm[3] !== undefined ? Number(ampm[3]) : 0;
-    const ap = ampm[4].toUpperCase();
-    if (ap === "PM" && h !== 12) h += 12;
-    if (ap === "AM" && h === 12) h = 0;
-    const d = new Date();
-    d.setHours(h, min, sec, 0);
-    return d.toISOString();
-  }
-
-  const m = /^(\d{1,2})\/(\d{1,2})\/(\d{2,4})$/.exec(trimmed);
-  if (m) {
-    const month = Number(m[1]) - 1;
-    const day = Number(m[2]);
-    let year = Number(m[3]);
-    if (year < 100) year += 2000;
-    const dt = new Date(year, month, day);
-    if (!Number.isNaN(dt.getTime())) return dt.toISOString();
-  }
+  const parsed = parseSesDateTimeToDate(raw);
+  if (parsed) return parsed.toISOString();
   return new Date().toISOString();
 }
 
@@ -396,6 +374,8 @@ function mapQueueRowToChat(
       row.region != null ? String(row.region).trim() || undefined : undefined,
   };
 
+  const createdAt = parseMessageTime(messageTime);
+
   let lastMessage: Message | undefined;
   if (lastMsg) {
     lastMessage = {
@@ -404,7 +384,7 @@ function mapQueueRowToChat(
       senderId: customer.id,
       senderRole: "customer",
       text: lastMsg,
-      createdAt: parseMessageTime(messageTime),
+      createdAt,
     };
   }
 
@@ -426,23 +406,28 @@ function mapQueueRowToChat(
       ? Math.max(0, Math.trunc(countsNum))
       : undefined;
 
+  const lastChatTimeDisplay =
+    lastChatTimeRaw !== ""
+      ? formatSidebarChatListTime(lastChatTimeRaw) || lastChatTimeRaw
+      : "";
+
   return {
     id,
     customer,
     agent: status === "assigned" ? agentUser : undefined,
     status,
     lastMessage,
-    createdAt: parseMessageTime(messageTime),
+    createdAt,
     messageTimeDisplay:
       messageTime.trim() !== ""
-        ? formatMessageTimeForDisplay(messageTime)
+        ? formatSidebarChatListTime(createdAt)
         : undefined,
     whatsappChatIndex: row.chatIndex,
     isChatActive: parseOptionalIsChatActive(
       (row as unknown as { isChatActive?: unknown }).isChatActive,
     ),
     lastAssignedAgent,
-    ...(lastChatTimeRaw !== "" ? { lastChatTime: lastChatTimeRaw } : {}),
+    ...(lastChatTimeDisplay !== "" ? { lastChatTime: lastChatTimeDisplay } : {}),
     ...(counts !== undefined ? { counts } : {}),
   };
 }
@@ -1299,6 +1284,9 @@ function findChatRowInState(chats: Chat[], chatId: string): Chat | undefined {
 
 /** Dedup Strict Mode / duplicate WS deliveries for the same customer message. */
 const recentMyChatMessageToastAtMs = new Map<string, number>();
+/** Shared across `NEW_MESSAGE` + `NEW_MESSAGE_COUNT` so both don't double-notify. */
+const recentMyChatNotifyAtMs = new Map<string, number>();
+const MY_CHAT_NOTIFY_DEDUP_MS = 2500;
 
 function messageToastPreview(message: Message): string {
   const text = stripSesPlaceholderCaption(
@@ -1330,6 +1318,25 @@ function isActiveChatForMessage(
   );
 }
 
+function isAssignedMyChat(chat: Chat, agentId: string | undefined): boolean {
+  if (!agentId) return false;
+  if (chat.status === "queued") return false;
+  return chat.agent?.id === agentId;
+}
+
+/** Returns true when this chat has not notified recently (and claims the slot). */
+function claimMyChatNotifySlot(chatId: string): boolean {
+  const nowMs = Date.now();
+  const lastAt = recentMyChatNotifyAtMs.get(chatId) ?? 0;
+  if (nowMs - lastAt < MY_CHAT_NOTIFY_DEDUP_MS) return false;
+  recentMyChatNotifyAtMs.set(chatId, nowMs);
+  return true;
+}
+
+function myChatNotifyToastId(chatId: string): string {
+  return `my-chat-msg:${chatId}`;
+}
+
 /** Notify agent of a new customer message on one of their assigned chats. */
 function notifyNewMyChatCustomerMessage(opts: {
   chat: Chat;
@@ -1338,16 +1345,14 @@ function notifyNewMyChatCustomerMessage(opts: {
   activeChatId: string | null;
 }) {
   const { chat, message, agentId, activeChatId } = opts;
-  if (!agentId) return;
+  if (!isAssignedMyChat(chat, agentId)) return;
   if (message.system) return;
   if (message.senderRole !== "customer") return;
-  if (chat.status === "queued") return;
-  if (chat.agent?.id !== agentId) return;
 
   const dedupKey = `${stableMessageListKey(message)}:${message.chatId}`;
   const nowMs = Date.now();
   const lastAt = recentMyChatMessageToastAtMs.get(dedupKey) ?? 0;
-  if (nowMs - lastAt < 2500) return;
+  if (nowMs - lastAt < MY_CHAT_NOTIFY_DEDUP_MS) return;
   recentMyChatMessageToastAtMs.set(dedupKey, nowMs);
 
   const viewingThisChat = isActiveChatForMessage(
@@ -1358,12 +1363,48 @@ function notifyNewMyChatCustomerMessage(opts: {
   // Open thread: message is already visible — no toast or sound.
   if (viewingThisChat) return;
 
+  const playSound = claimMyChatNotifySlot(chat.id);
   const customerName = chat.customer.name?.trim() || "Customer";
   const preview = messageToastPreview(message);
 
   queueMicrotask(() => {
+    if (playSound) playNewMessageNotificationSound();
+    toast.info(`${customerName}: ${preview}`, {
+      id: myChatNotifyToastId(chat.id),
+    });
+  });
+}
+
+/**
+ * Notify from SES `NEW_MESSAGE_COUNT` when unread rises on an assigned chat
+ * that is not open (no message body on this event).
+ * `chatAssignedTo === 0` means queue — never toast/sound.
+ * `chatAssignedTo === 1` means assigned — allow notify.
+ */
+function notifyNewMyChatFromMessageCount(opts: {
+  chat: Chat;
+  agentId: string | undefined;
+  activeChatId: string | null;
+  chatAssignedTo?: 0 | 1;
+}) {
+  const { chat, agentId, activeChatId, chatAssignedTo } = opts;
+  if (chatAssignedTo === 0) return;
+  if (chatAssignedTo !== 1 && !isAssignedMyChat(chat, agentId)) return;
+
+  const viewingThisChat = isActiveChatForMessage(
+    chat,
+    chat.id,
+    activeChatId,
+  );
+  if (viewingThisChat) return;
+  if (!claimMyChatNotifySlot(chat.id)) return;
+
+  const customerName = chat.customer.name?.trim() || "Customer";
+  queueMicrotask(() => {
     playNewMessageNotificationSound();
-    toast.info(`${customerName}: ${preview}`);
+    toast.info(`${customerName}: New message`, {
+      id: myChatNotifyToastId(chat.id),
+    });
   });
 }
 
@@ -2164,8 +2205,13 @@ export function useWebSocketChat(
             return prev;
           }
           case "new-message-count": {
-            const { chatId, domainIndex, chatFrom, counts: absoluteCounts } =
-              event.payload;
+            const {
+              chatId,
+              domainIndex,
+              chatFrom,
+              counts: absoluteCounts,
+              chatAssignedTo,
+            } = event.payload;
             const idStr = String(chatId).trim();
             if (!idStr) return prev;
 
@@ -2196,15 +2242,26 @@ export function useWebSocketChat(
                     String(prev.activeChatId)));
             if (isOpen) return prev;
 
+            const prevCounts = matchedChat.counts ?? 0;
+            const nextCounts =
+              absoluteCounts !== undefined && Number.isFinite(absoluteCounts)
+                ? Math.max(0, Math.trunc(absoluteCounts))
+                : Math.max(0, prevCounts + 1);
+
+            if (nextCounts > prevCounts) {
+              notifyNewMyChatFromMessageCount({
+                chat: matchedChat,
+                agentId: userId,
+                activeChatId: prev.activeChatId,
+                chatAssignedTo,
+              });
+            }
+
             return {
               ...prev,
               chats: prev.chats.map((c) => {
                 if (!matchesRow(c)) return c;
-                const next =
-                  absoluteCounts !== undefined && Number.isFinite(absoluteCounts)
-                    ? Math.max(0, Math.trunc(absoluteCounts))
-                    : Math.max(0, (c.counts ?? 0) + 1);
-                return { ...c, counts: next };
+                return { ...c, counts: nextCounts };
               }),
             };
           }

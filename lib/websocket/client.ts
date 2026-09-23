@@ -454,6 +454,19 @@ function tryNormalizeNewMessageCount(raw: unknown): IncomingEvent | null {
     o.unread_count;
   const counts = toOptionalNumber(countsRaw);
 
+  const chatAssignedToRaw =
+    data?.chatAssignedTo ??
+    data?.ChatAssignedTo ??
+    data?.chatassignedto ??
+    o.chatAssignedTo ??
+    o.ChatAssignedTo ??
+    o.chatassignedto;
+  const chatAssignedToNum = toOptionalNumber(chatAssignedToRaw);
+  const chatAssignedTo: 0 | 1 | undefined =
+    chatAssignedToNum === 0 || chatAssignedToNum === 1
+      ? chatAssignedToNum
+      : undefined;
+
   return {
     type: "new-message-count",
     payload: {
@@ -465,6 +478,7 @@ function tryNormalizeNewMessageCount(raw: unknown): IncomingEvent | null {
         data?.chatFrom ?? data?.ChatFrom ?? o.chatFrom ?? o.ChatFrom,
       ),
       ...(counts !== undefined && counts >= 0 ? { counts } : {}),
+      ...(chatAssignedTo !== undefined ? { chatAssignedTo } : {}),
     },
   };
 }

@@ -4,6 +4,7 @@ import { useEffect, useMemo, useState } from "react";
 import { FiArrowRight, FiSearch } from "react-icons/fi";
 import { cn } from "@/lib/utils";
 import { sortChatsByLatestFirst } from "../../lib/chat/chatSort";
+import { formatSidebarChatListTime } from "../../lib/chat/sesMessageTime";
 import { AvatarWithInitials } from "../atoms/AvatarWithInitials";
 import type { Chat, User } from "../../lib/chat/types";
 import { ChatSidebarTabs } from "./chat-sidebar/ChatSidebarTabs";
@@ -29,19 +30,13 @@ function unreadBadgeLabel(n: number): string {
   return String(n);
 }
 
-function formatTime(dateString: string): string {
-  const date = new Date(dateString);
-  const now = new Date();
-  const diffMs = now.getTime() - date.getTime();
-  const diffDays = Math.floor(diffMs / (1000 * 60 * 60 * 24));
-
-  if (diffDays === 0) {
-    return date.toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" });
-  }
-  if (diffDays === 1) {
-    return "Yesterday";
-  }
-  return date.toLocaleDateString([], { month: "short", day: "numeric" });
+/** Prefer ISO `createdAt` so Today/Yesterday stay correct; fall back to stored label. */
+function chatListTimeLabel(chat: Chat): string {
+  const fromInstant = formatSidebarChatListTime(
+    chat.lastMessage?.createdAt ?? chat.createdAt,
+  );
+  if (fromInstant) return fromInstant;
+  return chat.messageTimeDisplay?.trim() || "";
 }
 
 function customerSearchHaystack(customer: User): string {
@@ -225,12 +220,7 @@ export function ChatSidebarSection({
             rowClassName={(chat) =>
               `w-full text-left flex gap-3 p-3 rounded-lg hover:bg-gray-50 cursor-pointer border border-transparent mb-1 transition-colors ${chat.lastAssignedAgent && chat.lastChatTime ? "items-center" : "items-start"}`
             }
-            timeLabel={(chat) =>
-              chat.messageTimeDisplay ??
-              (chat.lastMessage
-                ? formatTime(chat.lastMessage.createdAt)
-                : formatTime(chat.createdAt))
-            }
+            timeLabel={(chat) => chatListTimeLabel(chat)}
             renderRowMeta={(chat) => {
               const unread = chat.counts ?? 0;
               const hasLastMeta = Boolean(
@@ -293,10 +283,7 @@ export function ChatSidebarSection({
               ? "bg-brand-50 border-brand-100"
               : "hover:bg-gray-50 border-transparent")
           }
-          timeLabel={(chat) =>
-            chat.messageTimeDisplay ??
-            (chat.lastMessage ? formatTime(chat.lastMessage.createdAt) : "")
-          }
+          timeLabel={(chat) => chatListTimeLabel(chat)}
           renderRowMeta={(chat) => {
             const unread = chat.counts ?? 0;
             return chat.customer.phone?.trim() || unread > 0 ? (

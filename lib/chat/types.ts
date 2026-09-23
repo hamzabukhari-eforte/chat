@@ -240,6 +240,11 @@ export type IncomingEvent =
         chatFrom?: number;
         /** When set, replaces the local count (authoritative from server). */
         counts?: number;
+        /**
+         * `1` = assigned (My Chats) — toast/sound allowed.
+         * `0` = queue — never toast/sound.
+         */
+        chatAssignedTo?: 0 | 1;
       };
     };
 

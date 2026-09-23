@@ -211,7 +211,8 @@ export function enrichSesWireTimeIfSecondsWereZero(wire: string): string {
 
 /**
  * Strip seconds from a clock string for UI (e.g. "09:50:15 AM" → "09:50 AM"; "10:17 AM" unchanged).
- * For outbound sockets use {@link formatMessageTimeForSesWire} (always includes seconds).
+ * Full datetimes (`2026-09-15 19:34:45.0`) are left unchanged here — use
+ * {@link formatSidebarChatListTime} for list labels.
  */
 export function formatMessageTimeForDisplay(raw: string): string {
   const t = raw.trim();
@@ -219,6 +220,77 @@ export function formatMessageTimeForDisplay(raw: string): string {
   const ampm = t.replace(/^(\d{1,2}:\d{2}):\d{2}(\s*[AP]M)$/i, "$1$2");
   if (ampm !== t) return ampm;
   return t.replace(/^(\d{1,2}:\d{2}):\d{2}$/, "$1");
+}
+
+/**
+ * Parse SES / SQL / ISO datetime strings into a Date (local when no zone is given).
+ * Handles `2026-09-15 19:34:45.0`, ISO, and 12h clocks (clock-only → today).
+ */
+export function parseSesDateTimeToDate(raw: string | null | undefined): Date | null {
+  const trimmed = String(raw ?? "").trim();
+  if (!trimmed) return null;
+
+  const sql = /^(\d{4})-(\d{2})-(\d{2})[ T](\d{2}):(\d{2}):(\d{2})(?:\.\d+)?$/.exec(
+    trimmed,
+  );
+  if (sql) {
+    const d = new Date(
+      Number(sql[1]),
+      Number(sql[2]) - 1,
+      Number(sql[3]),
+      Number(sql[4]),
+      Number(sql[5]),
+      Number(sql[6]),
+      0,
+    );
+    if (!Number.isNaN(d.getTime())) return d;
+  }
+
+  const iso = Date.parse(trimmed);
+  if (!Number.isNaN(iso)) {
+    const d = new Date(iso);
+    if (!Number.isNaN(d.getTime())) return d;
+  }
+
+  const hms = parseClockToHms(trimmed);
+  if (hms) {
+    const d = new Date();
+    d.setHours(hms.h, hms.m, hms.s, 0);
+    return d;
+  }
+
+  const mdy = /^(\d{1,2})\/(\d{1,2})\/(\d{2,4})$/.exec(trimmed);
+  if (mdy) {
+    const month = Number(mdy[1]) - 1;
+    const day = Number(mdy[2]);
+    let year = Number(mdy[3]);
+    if (year < 100) year += 2000;
+    const dt = new Date(year, month, day);
+    if (!Number.isNaN(dt.getTime())) return dt;
+  }
+
+  return null;
+}
+
+/**
+ * Sidebar Queue / My Chats timestamp: time today, "Yesterday", else short date.
+ * Sort must use the underlying ISO/`createdAt`, not this label.
+ */
+export function formatSidebarChatListTime(raw: string | null | undefined): string {
+  const d = parseSesDateTimeToDate(raw);
+  if (!d) return "";
+  const now = new Date();
+  const sod = (x: Date) =>
+    new Date(x.getFullYear(), x.getMonth(), x.getDate()).getTime();
+  const diffDays = Math.round((sod(now) - sod(d)) / 86400000);
+  if (diffDays === 0) {
+    return d.toLocaleTimeString([], { hour: "numeric", minute: "2-digit" });
+  }
+  if (diffDays === 1) return "Yesterday";
+  if (diffDays > 1 && diffDays < 7) {
+    return d.toLocaleDateString([], { weekday: "short" });
+  }
+  return d.toLocaleDateString([], { month: "short", day: "numeric" });
 }
 
 /**
