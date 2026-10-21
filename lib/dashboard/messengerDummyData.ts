@@ -1,24 +1,4 @@
-/** Messenger inbox monitor — sample data until APIs are wired. */
-
-/** Same KPI names / shape as the WhatsApp ops dashboard (dummy values). */
-export const messengerDashboardKpis = {
-  totalChats: 124,
-  totalChatsHint: "Last 12 hours",
-  chatsInQueue: 4,
-  chatsInQueueHint: "Avg wait ~6.4 min",
-  chatsAssignedToAgents: 9,
-  chatsAssignedToAgentsHint: "Active ownership",
-  closedByAgents: 98,
-  closedByAgentsHint: "Chats closed while owned by an agent",
-  ticketsRegisteredLast24Hours: 27,
-  ticketsRegisteredHint: "Last 12 hours",
-  messagesSent: 412,
-  messagesSentHint: "Outbound agent & system messages",
-  avgResponseTimeMinutes: 3 + 12 / 60,
-  avgResponseTimeHint: "First meaningful reply (minutes)",
-  avgResolutionTimeMinutes: 18 + 24 / 60,
-  avgResolutionTimeHint: "Open to closed (minutes)",
-} as const;
+/** Messenger inbox monitor — sample charts/table until those APIs are wired. */
 
 /** Hourly volume + response times (full day, 12 AM → 11 PM). */
 export const messengerChatsThroughDay = [

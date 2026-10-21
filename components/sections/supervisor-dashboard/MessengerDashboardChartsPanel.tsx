@@ -17,16 +17,21 @@ import { toast } from "sonner";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { ChatWindowModals } from "@/components/sections/chat-window/ChatWindowModals";
+import { useMessengerDashboardKpis } from "@/hooks/useMessengerDashboardKpis";
+import { useMessengerTransferContext } from "@/hooks/useMessengerTransferContext";
+import { transferChannelChat } from "@/lib/agent/transferChannelChat";
 import { cn } from "@/lib/utils";
-import type { TransferAgentOption } from "@/lib/chat/types";
 import {
   MESSENGER_TIME_LIMIT_MINUTES,
-  messengerAgents,
   messengerChatsThroughDay,
-  messengerDashboardKpis,
-  messengerNoReplyRows,
-  type MessengerNoReplyRow,
 } from "@/lib/dashboard/messengerDummyData";
+
+type WaitingRow = {
+  id: string;
+  customer: string;
+  agentName: string;
+  customerWaitingTime: string | null;
+};
 
 const chartCardClass = "border border-gray-200 bg-white shadow-sm";
 
@@ -66,13 +71,6 @@ const tooltipProps = {
   },
 } as const;
 
-function formatDuration(totalSeconds: number): string {
-  const s = Math.max(0, Math.floor(totalSeconds));
-  const m = Math.floor(s / 60);
-  const sec = s % 60;
-  return `${m}m ${String(sec).padStart(2, "0")}s`;
-}
-
 function formatMinutesKpi(minutes: number): string {
   if (!Number.isFinite(minutes) || minutes < 0) return "—";
   if (minutes === 0) return "0 min";
@@ -104,25 +102,48 @@ function avatarClass(seed: string): string {
 }
 
 type ChartMode = "volume" | "response";
-type AgentFilter = "all" | "Usman Ghani" | "Danish Rauf";
 
-const messengerTransferAgents: TransferAgentOption[] = messengerAgents.map(
-  (a) => ({
-    id: a.id,
-    name: a.name,
-    isLoggedIn: a.online,
-  }),
-);
+function mapWaitingRows(
+  chats: {
+    conversationId: number;
+    assignedTo: string;
+    customer: string;
+    customerWaitingTime: string | null;
+  }[],
+): WaitingRow[] {
+  return chats.map((c) => ({
+    id: String(c.conversationId),
+    customer: c.customer.trim() || `Chat ${c.conversationId}`,
+    agentName: c.assignedTo.trim() || "Unassigned",
+    customerWaitingTime: c.customerWaitingTime,
+  }));
+}
 
-/** Messenger inbox monitor — sample UI matching the ops reference layout. */
-export function MessengerDashboardChartsPanel() {
-  const kpi = messengerDashboardKpis;
+/** Messenger inbox monitor — KPIs from POST `/SES/SocialMedia/messenger/dashboard`. */
+export function MessengerDashboardChartsPanel({
+  supervisorUserId,
+}: {
+  supervisorUserId?: string;
+} = {}) {
+  const {
+    data: kpi,
+    waitingChats,
+    loading: kpiLoading,
+    error: kpiError,
+    refetch: refetchKpis,
+  } = useMessengerDashboardKpis(supervisorUserId);
+  const {
+    apiUrls,
+    transferAgents,
+    domainIndex,
+    chatFrom,
+    error: transferContextError,
+  } = useMessengerTransferContext();
   const [chartMode, setChartMode] = useState<ChartMode>("response");
-  const [agentFilter, setAgentFilter] = useState<AgentFilter>("all");
+  const [agentFilter, setAgentFilter] = useState<string>("all");
   const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set());
-  const [noReplySource, setNoReplySource] = useState<MessengerNoReplyRow[]>(() => [
-    ...messengerNoReplyRows,
-  ]);
+  const [noReplySource, setNoReplySource] = useState<WaitingRow[]>([]);
+  const [transferBusy, setTransferBusy] = useState(false);
 
   const [transferQueueConfirmOpen, setTransferQueueConfirmOpen] = useState(false);
   const [transferAgentModalOpen, setTransferAgentModalOpen] = useState(false);
@@ -135,13 +156,28 @@ export function MessengerDashboardChartsPanel() {
   const [transferAgentSearch, setTransferAgentSearch] = useState("");
 
   useEffect(() => {
+    if (!kpiError) return;
+    toast.error(`KPIs could not be loaded: ${kpiError}`);
+  }, [kpiError]);
+
+  useEffect(() => {
+    if (!transferContextError) return;
+    toast.error(`Transfer agents could not be loaded: ${transferContextError}`);
+  }, [transferContextError]);
+
+  useEffect(() => {
+    setNoReplySource(mapWaitingRows(waitingChats));
+    setSelectedIds(new Set());
+    setAgentFilter("all");
+  }, [waitingChats]);
+
+  useEffect(() => {
     if (!transferAgentModalOpen) setTransferAgentSearch("");
   }, [transferAgentModalOpen]);
 
-  const agentFilterCounts = useMemo(() => {
-    const usman = noReplySource.filter((r) => r.agentName === "Usman Ghani").length;
-    const danish = noReplySource.filter((r) => r.agentName === "Danish Rauf").length;
-    return { all: noReplySource.length, usman, danish };
+  const agentNames = useMemo(() => {
+    const names = new Set(noReplySource.map((r) => r.agentName));
+    return [...names].sort((a, b) => a.localeCompare(b));
   }, [noReplySource]);
 
   const noReplyRows = useMemo(() => {
@@ -156,14 +192,18 @@ export function MessengerDashboardChartsPanel() {
 
   const filteredTransferAgents = useMemo(() => {
     const q = transferAgentSearch.trim().toLowerCase();
-    const excludeName = transferTargetRow?.agentName;
-    const base = messengerTransferAgents.filter((a) => a.name !== excludeName);
+    const excludeName = transferTargetRow?.agentName.trim().toLowerCase();
+    const base = excludeName
+      ? transferAgents.filter(
+          (a) => a.name.trim().toLowerCase() !== excludeName,
+        )
+      : transferAgents;
     if (!q) return base;
     return base.filter(
       (a) =>
         a.name.toLowerCase().includes(q) || a.id.toLowerCase().includes(q),
     );
-  }, [transferAgentSearch, transferTargetRow?.agentName]);
+  }, [transferAgentSearch, transferAgents, transferTargetRow?.agentName]);
 
   useEffect(() => {
     if (!transferAgentModalOpen || !selectedTransferAgentId) return;
@@ -225,29 +265,102 @@ export function MessengerDashboardChartsPanel() {
   function confirmTransferQueue() {
     const row = transferTargetRow;
     setTransferQueueConfirmOpen(false);
-    setTransferTargetRowId(null);
-    if (!row) return;
-    removeTransferredRow(row.id);
-    toast.success(
-      `${row.customer}'s chat transferred to queue (sample).`,
-    );
+    if (!row) {
+      setTransferTargetRowId(null);
+      return;
+    }
+    if (domainIndex === null || chatFrom === null) {
+      toast.error("Unable to transfer this chat right now.");
+      setTransferTargetRowId(null);
+      return;
+    }
+    if (transferBusy) return;
+    setTransferBusy(true);
+    void (async () => {
+      try {
+        const status = await transferChannelChat(
+          apiUrls,
+          row.id,
+          domainIndex,
+          chatFrom,
+          0,
+          false,
+        );
+        if (status === 1) {
+          toast.success("Chat transferred to queue.");
+          removeTransferredRow(row.id);
+          refetchKpis();
+          return;
+        }
+        if (status === 2) {
+          toast.info("This chat is already closed.");
+          removeTransferredRow(row.id);
+          refetchKpis();
+          return;
+        }
+        toast.error("Unable to transfer this chat right now.");
+      } catch {
+        toast.error("Unable to transfer this chat right now.");
+      } finally {
+        setTransferBusy(false);
+        setTransferTargetRowId(null);
+      }
+    })();
   }
 
   function confirmTransferAgent() {
     if (!selectedTransferAgentId || !transferTargetRow) return;
-    const agent = messengerTransferAgents.find(
-      (a) => a.id === selectedTransferAgentId,
-    );
+    const agent = transferAgents.find((a) => a.id === selectedTransferAgentId);
     if (!agent) return;
-    const customer = transferTargetRow.customer;
-    const rowId = transferTargetRow.id;
+    if (domainIndex === null || chatFrom === null) {
+      toast.error("Unable to transfer this chat right now.");
+      return;
+    }
+    const agentIndex = Number(String(agent.id).trim());
+    if (!Number.isFinite(agentIndex)) {
+      toast.error("Invalid agent selected.");
+      return;
+    }
+    if (transferBusy) return;
+
+    const row = transferTargetRow;
     setTransferAgentModalOpen(false);
     setSelectedTransferAgentId(null);
-    setTransferTargetRowId(null);
-    removeTransferredRow(rowId);
-    toast.success(
-      `${customer}'s chat transferred to ${agent.name} (sample).`,
-    );
+    setTransferBusy(true);
+    void (async () => {
+      try {
+        const status = await transferChannelChat(
+          apiUrls,
+          row.id,
+          domainIndex,
+          chatFrom,
+          agentIndex,
+          true,
+        );
+        if (status === 1) {
+          toast.success(`Chat transferred to ${agent.name}.`);
+          removeTransferredRow(row.id);
+          refetchKpis();
+          return;
+        }
+        if (status === 2) {
+          toast.info("This chat is already closed.");
+          removeTransferredRow(row.id);
+          refetchKpis();
+          return;
+        }
+        if (status === 3) {
+          toast.info("Self-assignment isn't allowed - pick another agent.");
+          return;
+        }
+        toast.error("Unable to transfer this chat right now.");
+      } catch {
+        toast.error("Unable to transfer this chat right now.");
+      } finally {
+        setTransferBusy(false);
+        setTransferTargetRowId(null);
+      }
+    })();
   }
 
   return (
@@ -263,52 +376,64 @@ export function MessengerDashboardChartsPanel() {
         <StatCard
           accent="slate"
           label="Total chats"
-          value={kpi.totalChats}
-          hint={kpi.totalChatsHint}
+          value={kpi?.totalChats ?? null}
+          hint="Last 12 hours"
+          isLoading={kpiLoading}
         />
         <StatCard
           accent="sky"
           label="In queue"
-          value={kpi.chatsInQueue}
-          hint={kpi.chatsInQueueHint}
+          value={kpi?.chatsInQueue ?? null}
+          hint="Waiting for an agent"
+          isLoading={kpiLoading}
         />
         <StatCard
           accent="violet"
           label="In progress"
-          value={kpi.chatsAssignedToAgents}
-          hint={kpi.chatsAssignedToAgentsHint}
+          value={kpi?.chatsAssignedToAgents ?? null}
+          hint={
+            kpi?.activeCount != null && !kpiLoading
+              ? `${kpi.activeCount} active overall`
+              : "Active ownership"
+          }
+          isLoading={kpiLoading}
         />
         <StatCard
           accent="emerald"
           label="Closed by agents"
-          value={kpi.closedByAgents}
-          hint={kpi.closedByAgentsHint}
+          value={kpi?.closedByAgents ?? null}
+          hint="Chats closed while owned by an agent"
+          isLoading={kpiLoading}
         />
         <StatCard
           accent="amber"
           label="Tickets registered"
-          value={kpi.ticketsRegisteredLast24Hours}
-          hint={kpi.ticketsRegisteredHint}
+          value={kpi?.ticketsRegisteredLast24Hours ?? null}
+          hint="Last 12 hours"
+          isLoading={kpiLoading}
         />
         <StatCard
           accent="teal"
           label="Messages sent"
-          value={kpi.messagesSent}
-          hint={kpi.messagesSentHint}
+          value={kpi?.messagesSent ?? null}
+          hint="Outbound agent & system messages"
+          isLoading={kpiLoading}
         />
         <StatCard
           accent="rose"
           label="Avg response time"
-          value={kpi.avgResponseTimeMinutes}
+          value={kpi?.avgResponseTimeMinutes ?? null}
           formatValue={formatMinutesKpi}
-          hint={kpi.avgResponseTimeHint}
+          hint="First meaningful reply (minutes)"
+          isLoading={kpiLoading}
         />
         <StatCard
           accent="orange"
           label="Avg resolution time"
-          value={kpi.avgResolutionTimeMinutes}
+          value={kpi?.avgResolutionTimeMinutes ?? null}
           formatValue={formatMinutesKpi}
-          hint={kpi.avgResolutionTimeHint}
+          hint="Open to closed (minutes)"
+          isLoading={kpiLoading}
         />
       </div>
 
@@ -421,21 +546,24 @@ export function MessengerDashboardChartsPanel() {
             </CardDescription>
           </div>
           <div className="flex flex-wrap gap-1.5">
-            {(
-              [
-                ["all", `All (${agentFilterCounts.all})`],
-                ["Usman Ghani", `Usman (${agentFilterCounts.usman})`],
-                ["Danish Rauf", `Danish (${agentFilterCounts.danish})`],
-              ] as const
-            ).map(([key, label]) => (
-              <TabPill
-                key={key}
-                active={agentFilter === key}
-                onClick={() => setAgentFilter(key)}
-              >
-                {label}
-              </TabPill>
-            ))}
+            <TabPill
+              active={agentFilter === "all"}
+              onClick={() => setAgentFilter("all")}
+            >
+              {`All (${noReplySource.length})`}
+            </TabPill>
+            {agentNames.map((name) => {
+              const count = noReplySource.filter((r) => r.agentName === name).length;
+              return (
+                <TabPill
+                  key={name}
+                  active={agentFilter === name}
+                  onClick={() => setAgentFilter(name)}
+                >
+                  {`${name} (${count})`}
+                </TabPill>
+              );
+            })}
           </div>
         </CardHeader>
         <CardContent className="min-h-0 flex-1 overflow-auto p-0">
@@ -447,6 +575,7 @@ export function MessengerDashboardChartsPanel() {
             onToggleRow={toggleRow}
             onTransferToQueue={openTransferQueueConfirm}
             onTransferToAgent={openTransferAgentModal}
+            isLoading={kpiLoading}
           />
         </CardContent>
       </Card>
@@ -457,7 +586,7 @@ export function MessengerDashboardChartsPanel() {
         closeChatConfirmOpen={false}
         transferAgentModalOpen={transferAgentModalOpen}
         transferAgentSearch={transferAgentSearch}
-        transferAgents={messengerTransferAgents}
+        transferAgents={transferAgents}
         filteredTransferAgents={filteredTransferAgents}
         selectedTransferAgentId={selectedTransferAgentId}
         onCloseImagePreview={() => {}}
@@ -487,14 +616,21 @@ function StatCard({
   value,
   hint,
   formatValue,
+  isLoading = false,
 }: {
   accent: StatAccent;
   label: string;
-  value: number;
+  value: number | null;
   hint: string;
   formatValue?: (value: number) => string;
+  isLoading?: boolean;
 }) {
-  const displayMain = formatValue ? formatValue(value) : value.toLocaleString();
+  const displayMain =
+    value === null || isLoading
+      ? null
+      : formatValue
+        ? formatValue(value)
+        : value.toLocaleString();
 
   return (
     <Card
@@ -513,7 +649,16 @@ function StatCard({
             formatValue ? "text-2xl sm:text-3xl" : "text-3xl",
           )}
         >
-          {displayMain}
+          {isLoading ? (
+            <span
+              className="inline-block h-9 w-[5.5rem] max-w-full animate-pulse rounded-md bg-gray-200"
+              aria-hidden
+            />
+          ) : value === null ? (
+            "—"
+          ) : (
+            displayMain
+          )}
         </CardTitle>
       </CardHeader>
       <CardContent>
@@ -556,15 +701,25 @@ function NoReplyTable({
   onToggleRow,
   onTransferToQueue,
   onTransferToAgent,
+  isLoading = false,
 }: {
-  rows: MessengerNoReplyRow[];
+  rows: WaitingRow[];
   selectedIds: Set<string>;
   allSelected: boolean;
   onToggleAll: () => void;
   onToggleRow: (id: string) => void;
   onTransferToQueue: (rowId: string) => void;
   onTransferToAgent: (rowId: string) => void;
+  isLoading?: boolean;
 }) {
+  if (isLoading) {
+    return (
+      <p className="px-6 py-10 text-center text-sm text-gray-500">
+        Loading waiting chats…
+      </p>
+    );
+  }
+
   if (rows.length === 0) {
     return (
       <p className="px-6 py-10 text-center text-sm text-gray-500">
@@ -577,11 +732,10 @@ function NoReplyTable({
     <table className="w-full min-w-180 table-fixed text-left text-sm">
       <colgroup>
         <col className="w-12" />
-        <col className="w-[28%]" />
-        <col className="w-[16%]" />
-        <col className="w-[12%]" />
-        <col className="w-[14%]" />
         <col />
+        <col />
+        <col />
+        <col className="w-72" />
       </colgroup>
       <thead className="sticky top-0 z-10 border-b border-gray-200 bg-gray-50 text-xs font-medium uppercase tracking-wide text-gray-500 shadow-[0_1px_0_0_rgba(0,0,0,0.04)]">
         <tr>
@@ -596,7 +750,6 @@ function NoReplyTable({
           </th>
           <th className="bg-gray-50 px-3 py-3">Customer</th>
           <th className="bg-gray-50 px-3 py-3">Assigned to</th>
-          <th className="bg-gray-50 px-3 py-3">With agent</th>
           <th className="bg-gray-50 px-3 py-3">Customer waiting</th>
           <th className="bg-gray-50 px-4 py-3 text-left">Actions</th>
         </tr>
@@ -623,39 +776,19 @@ function NoReplyTable({
                 >
                   {initials(row.customer)}
                 </div>
-                <div className="min-w-0">
-                  <p className="truncate font-medium text-gray-900">{row.customer}</p>
-                  <p className="truncate text-xs text-gray-500">{row.lastMessage}</p>
-                </div>
+                <p className="min-w-0 truncate font-medium text-gray-900">
+                  {row.customer}
+                </p>
               </div>
             </td>
             <td className="px-3 py-3">
-              <div className="flex items-center gap-1.5">
-                <span
-                  className={cn(
-                    "h-2 w-2 shrink-0 rounded-full",
-                    row.agentOnline ? "bg-emerald-500" : "bg-rose-500",
-                  )}
-                  aria-hidden
-                />
-                <div className="min-w-0">
-                  <p className="truncate font-medium text-gray-800">{row.agentName}</p>
-                  {!row.agentOnline ? (
-                    <p className="text-xs font-medium text-rose-600">Offline</p>
-                  ) : (
-                    <p className="text-xs text-gray-500">Online</p>
-                  )}
-                </div>
-              </div>
+              <p className="truncate font-medium text-gray-800">{row.agentName}</p>
             </td>
-            <td className="whitespace-nowrap px-3 py-3 font-semibold tabular-nums text-rose-600">
-              {formatDuration(row.withAgentSeconds)}
-            </td>
-            <td className="whitespace-nowrap px-3 py-3 font-semibold tabular-nums text-rose-600">
-              {formatDuration(row.customerWaitingSeconds)}
+            <td className="px-3 py-3 font-semibold tabular-nums text-rose-600">
+              {row.customerWaitingTime ?? "—"}
             </td>
             <td className="px-4 py-3 text-left">
-              <div className="flex flex-wrap items-center justify-start gap-1.5">
+              <div className="flex flex-wrap items-center gap-1.5">
                 <Button
                   type="button"
                   variant="outline"
