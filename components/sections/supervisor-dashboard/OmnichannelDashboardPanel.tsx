@@ -160,30 +160,42 @@ function initials(name: string): string {
 }
 
 /** Omnichannel ops overview — Admin Dashboards visual language. */
-export function OmnichannelDashboardPanel({
-  agentName = "Dr. Fizza",
-}: {
-  agentName?: string;
-} = {}) {
+export function OmnichannelDashboardPanel() {
   const [periodId, setPeriodId] = useState<string>("4");
   const totalMessages = omnichannelChannelShare.reduce((s, r) => s + r.value, 0);
 
   return (
-    <div className="space-y-5" style={{ color: ESD.text }}>
-      {/* Header — title/desc, then Admin-style DATE filter below on the left */}
+    <div
+      className="space-y-5"
+      style={{
+        color: ESD.text,
+        fontFamily: 'Helvetica, "Helvetica Neue", Arial, sans-serif',
+      }}
+    >
+      {/* Admin Dashboards page head: breadcrumb + title + filter toolbar */}
       <div>
-        <h2 className="text-2xl font-semibold tracking-tight text-[#1e293b]">
-          Welcome back, {agentName}!
+        <nav aria-label="Breadcrumb" className="mb-1.5">
+          <ol className="m-0 flex list-none flex-wrap items-center p-0 text-[0.833rem] font-medium leading-snug">
+            <li className="text-[#095CBC]">
+              <span>Reports</span>
+            </li>
+            <li
+              className="before:px-2 before:font-normal before:text-[#9da9bb] before:content-['/'] text-[#748194]"
+              aria-current="page"
+            >
+              Omnichannel Dashboard
+            </li>
+          </ol>
+        </nav>
+        <h2 className="m-0 mb-4 text-[24px] font-[500] leading-tight text-[#095CBC]">
+          Omnichannel Dashboard
         </h2>
-        <p className="mt-1 text-base text-[#64748b]">
-          Here&apos;s what&apos;s happening across your channels today.
-        </p>
 
-        <div className="mt-4 flex flex-wrap items-center gap-x-4 gap-y-2">
-          <div className="inline-flex min-w-0 flex-wrap items-center gap-2.5">
+        <div className="flex flex-wrap items-center gap-x-[1.1rem] gap-y-2">
+          <div className="inline-flex min-w-0 flex-wrap items-center gap-[0.55rem]">
             <label
               htmlFor="omni-period"
-              className="inline-flex items-center gap-1.5 text-[0.72rem] font-bold uppercase tracking-[0.06em] text-[#64748b]"
+              className="m-0 inline-flex items-center gap-[0.35rem] text-[0.72rem] font-bold uppercase tracking-[0.06em] text-[#64748b]"
             >
               <FiCalendar className="h-3.5 w-3.5 shrink-0" aria-hidden />
               Date

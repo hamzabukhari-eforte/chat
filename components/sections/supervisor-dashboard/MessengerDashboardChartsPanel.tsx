@@ -1,17 +1,18 @@
 "use client";
 
 import { useEffect, useMemo, useState } from "react";
-import {
-  CartesianGrid,
-  Legend,
-  Line,
-  LineChart,
-  ReferenceLine,
-  ResponsiveContainer,
-  Tooltip,
-  XAxis,
-  YAxis,
-} from "recharts";
+// Temporarily unused while "Chats through the day" chart is commented out:
+// import {
+//   CartesianGrid,
+//   Legend,
+//   Line,
+//   LineChart,
+//   ReferenceLine,
+//   ResponsiveContainer,
+//   Tooltip,
+//   XAxis,
+//   YAxis,
+// } from "recharts";
 import { FiAlertCircle } from "react-icons/fi";
 import { toast } from "sonner";
 import { Button } from "@/components/ui/button";
@@ -21,10 +22,10 @@ import { useMessengerDashboardKpis } from "@/hooks/useMessengerDashboardKpis";
 import { useMessengerTransferContext } from "@/hooks/useMessengerTransferContext";
 import { transferChannelChat } from "@/lib/agent/transferChannelChat";
 import { cn } from "@/lib/utils";
-import {
-  MESSENGER_TIME_LIMIT_MINUTES,
-  messengerChatsThroughDay,
-} from "@/lib/dashboard/messengerDummyData";
+// import {
+//   MESSENGER_TIME_LIMIT_MINUTES,
+//   messengerChatsThroughDay,
+// } from "@/lib/dashboard/messengerDummyData";
 
 type WaitingRow = {
   id: string;
@@ -57,19 +58,20 @@ const statLeftAccent: Record<StatAccent, string> = {
   orange: "border-l-orange-600",
 };
 
-const BRAND = "#4f46e5";
-const BRAND_MUTED = "#818cf8";
-const GRID = "#e5e7eb";
-const AXIS = "#6b7280";
-const LIMIT_COLOR = "#e11d48";
-
-const tooltipProps = {
-  contentStyle: {
-    borderRadius: "10px",
-    border: "1px solid #e5e7eb",
-    fontSize: "12px",
-  },
-} as const;
+// Temporarily unused while "Chats through the day" chart is commented out:
+// const BRAND = "#4f46e5";
+// const BRAND_MUTED = "#818cf8";
+// const GRID = "#e5e7eb";
+// const AXIS = "#6b7280";
+// const LIMIT_COLOR = "#e11d48";
+//
+// const tooltipProps = {
+//   contentStyle: {
+//     borderRadius: "10px",
+//     border: "1px solid #e5e7eb",
+//     fontSize: "12px",
+//   },
+// } as const;
 
 function formatMinutesKpi(minutes: number): string {
   if (!Number.isFinite(minutes) || minutes < 0) return "—";
@@ -101,7 +103,7 @@ function avatarClass(seed: string): string {
   return AVATAR_COLORS[hash] ?? AVATAR_COLORS[0];
 }
 
-type ChartMode = "volume" | "response";
+// type ChartMode = "volume" | "response";
 
 function mapWaitingRows(
   chats: {
@@ -139,7 +141,7 @@ export function MessengerDashboardChartsPanel({
     chatFrom,
     error: transferContextError,
   } = useMessengerTransferContext();
-  const [chartMode, setChartMode] = useState<ChartMode>("response");
+  // const [chartMode, setChartMode] = useState<ChartMode>("response");
   const [agentFilter, setAgentFilter] = useState<string>("all");
   const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set());
   const [noReplySource, setNoReplySource] = useState<WaitingRow[]>([]);
@@ -437,6 +439,7 @@ export function MessengerDashboardChartsPanel({
         />
       </div>
 
+      {/* Temporarily hidden — Chats through the day chart
       <Card className={cn(chartCardClass, "flex h-[500px] min-h-0 w-full flex-col")}>
         <CardHeader className="flex shrink-0 flex-row flex-wrap items-start justify-between gap-3 space-y-0">
           <div>
@@ -532,6 +535,7 @@ export function MessengerDashboardChartsPanel({
           </div>
         </CardContent>
       </Card>
+      */}
 
       <Card className={cn(chartCardClass, "flex h-[700px] min-h-0 w-full flex-col")}>
         <CardHeader className="shrink-0 space-y-3">
