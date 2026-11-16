@@ -3,10 +3,15 @@
 import { usePathname } from "next/navigation";
 
 type NavKey = "dashboard" | "queue" | "assigned";
-type DashboardKind = "whatsapp" | "messenger" | "omnichannel";
+type DashboardKind =
+  | "whatsapp"
+  | "messenger"
+  | "instagram"
+  | "omnichannel";
 
 function resolveKind(pathname: string): DashboardKind {
   if (pathname.startsWith("/messenger-dashboard")) return "messenger";
+  if (pathname.startsWith("/instagram-dashboard")) return "instagram";
   if (pathname.startsWith("/omnichannel-dashboard")) return "omnichannel";
   return "whatsapp";
 }
@@ -15,9 +20,11 @@ function pathToActive(pathname: string, kind: DashboardKind): NavKey {
   const base =
     kind === "messenger"
       ? "/messenger-dashboard"
-      : kind === "omnichannel"
-        ? "/omnichannel-dashboard"
-        : "/dashboard";
+      : kind === "instagram"
+        ? "/instagram-dashboard"
+        : kind === "omnichannel"
+          ? "/omnichannel-dashboard"
+          : "/dashboard";
   if (pathname.startsWith(`${base}/queue`)) return "queue";
   if (pathname.startsWith(`${base}/assigned`)) return "assigned";
   return "dashboard";
@@ -33,6 +40,11 @@ const TITLES: Record<DashboardKind, Record<NavKey, string>> = {
     dashboard: "Messenger dashboard",
     queue: "Messenger queue",
     assigned: "Messenger assigned",
+  },
+  instagram: {
+    dashboard: "Instagram dashboard",
+    queue: "Instagram queue",
+    assigned: "Instagram assigned",
   },
   omnichannel: {
     dashboard: "Omnichannel dashboard",
